@@ -122,7 +122,7 @@ npm run dev
 | Contract | Network | Address |
 |----------|---------|---------|
 | StockPilotAgent | Mantle Sepolia | [`0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9`](https://sepolia.mantlescan.xyz/address/0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9) |
-| StockPilotAgent | Mantle Mainnet | TBD |
+| StockPilotAgent | Mantle Mainnet | [`0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9`](https://mantlescan.xyz/address/0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9) |
 
 ## xStocks Integration
 
