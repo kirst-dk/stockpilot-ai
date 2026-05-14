@@ -89,6 +89,37 @@ class XStocksClient:
                 prices[symbol] = 0.0
         return prices
 
+    async def get_market_fees(self) -> dict:
+        """Get fee schedule for all operation types (issuance, redemption, xChange)."""
+        resp = await self._client.get("/trades/market/fees")
+        resp.raise_for_status()
+        return resp.json()
+
+    async def get_issuance_wallets(self) -> dict:
+        """Get deposit addresses for market issuance (stablecoin -> xStock)."""
+        resp = await self._client.get("/trades/market/issuance/sweeping-wallets")
+        resp.raise_for_status()
+        return resp.json()
+
+    async def get_redemption_wallets(self) -> dict:
+        """Get deposit addresses for market redemption (xStock -> stablecoin)."""
+        resp = await self._client.get("/trades/market/redemption/sweeping-wallets")
+        resp.raise_for_status()
+        return resp.json()
+
+    async def get_xchange_quote(self, symbol: str) -> dict:
+        """Get real-time Atomic RFQ quote for an xStock asset.
+
+        Returns executable price with spread via xChange (Fluxion).
+        More accurate than price-data for actual trade execution.
+
+        Args:
+            symbol: The xStock symbol (e.g., 'TSLAx', 'AAPLx')
+        """
+        resp = await self._client.get(f"/trades/xchange/assets/{symbol}")
+        resp.raise_for_status()
+        return resp.json()
+
     async def get_mantle_deployments(self) -> list[dict]:
         """Get all xStock tokens deployed on Mantle network."""
         assets = await self.get_all_assets()

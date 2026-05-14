@@ -211,6 +211,54 @@ async def get_mantle_tokens():
         raise HTTPException(500, str(e))
 
 
+@app.get("/api/market-fees")
+async def get_market_fees():
+    """Get xStocks fee schedule for issuance, redemption, and xChange operations."""
+    if not xstocks_client:
+        raise HTTPException(500, "xStocks client not initialized")
+    try:
+        fees = await xstocks_client.get_market_fees()
+        return fees
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/assets/{symbol}/quote")
+async def get_xchange_quote(symbol: str):
+    """Get real-time Atomic RFQ quote for an xStock via xChange (Fluxion)."""
+    if not xstocks_client:
+        raise HTTPException(500, "xStocks client not initialized")
+    try:
+        quote = await xstocks_client.get_xchange_quote(symbol)
+        return quote
+    except Exception as e:
+        raise HTTPException(404, f"Quote for {symbol} not available: {e}")
+
+
+@app.get("/api/assets/{symbol}/multiplier")
+async def get_asset_multiplier(symbol: str):
+    """Get current multiplier for an xStock (reflects dividends/splits)."""
+    if not xstocks_client:
+        raise HTTPException(500, "xStocks client not initialized")
+    try:
+        multiplier = await xstocks_client.get_multiplier(symbol)
+        return multiplier
+    except Exception as e:
+        raise HTTPException(404, f"Multiplier for {symbol} not found: {e}")
+
+
+@app.get("/api/proof-of-reserves")
+async def get_proof_of_reserves():
+    """Get proof of reserves data for all xStock assets."""
+    if not xstocks_client:
+        raise HTTPException(500, "xStocks client not initialized")
+    try:
+        por = await xstocks_client.get_proof_of_reserves()
+        return por
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

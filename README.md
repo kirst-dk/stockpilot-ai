@@ -122,7 +122,7 @@ npm run dev
 | Contract | Network | Address |
 |----------|---------|---------|
 | StockPilotAgent | Mantle Sepolia | [`0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9`](https://sepolia.mantlescan.xyz/address/0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9) |
-| StockPilotAgent | Mantle Mainnet | TBD |
+| StockPilotAgent | Mantle Mainnet | [`0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9`](https://mantlescan.xyz/address/0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9) |
 
 ## xStocks Integration
 
@@ -146,6 +146,10 @@ StockPilot AI integrates with [xStocks](https://xstocks.fi) tokenized equities o
 | `/api/strategy` | POST | Change trading strategy |
 | `/api/strategies` | GET | List available strategies |
 | `/api/history` | GET | Trade execution history |
+| `/api/market-fees` | GET | xStocks fee schedule (issuance/redemption/xChange) |
+| `/api/assets/{symbol}/quote` | GET | Real-time Atomic RFQ quote via xChange |
+| `/api/assets/{symbol}/multiplier` | GET | Asset multiplier (dividends/splits) |
+| `/api/proof-of-reserves` | GET | Proof of reserves for all xStocks |
 
 ## Trading Strategies
 
