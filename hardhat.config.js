@@ -26,10 +26,7 @@ module.exports = {
     },
   },
   etherscan: {
-    apiKey: {
-      mantleSepolia: process.env.MANTLESCAN_API_KEY || "placeholder",
-      mantleMainnet: process.env.MANTLESCAN_API_KEY || "placeholder",
-    },
+    apiKey: process.env.MANTLESCAN_API_KEY || "placeholder",
     customChains: [
       {
         network: "mantleSepolia",
@@ -48,5 +45,8 @@ module.exports = {
         },
       },
     ],
+  },
+  sourcify: {
+    enabled: true,
   },
 };
