@@ -110,7 +110,7 @@ class XStocksClient:
     async def get_xchange_quote(self, symbol: str) -> dict:
         """Get real-time Atomic RFQ quote for an xStock asset.
 
-        Returns executable price with spread via xChange (Fluxion).
+        Returns executable price with spread via xChange (xStocks Atomic RFQ).
         More accurate than price-data for actual trade execution.
 
         Args:

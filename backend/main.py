@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from xstocks_api.client import XStocksClient
+from fluxion.client import FluxionClient
 from agent.ai_engine import AIEngine
 from agent.portfolio_agent import PortfolioAgent, AVAILABLE_STRATEGIES
 
@@ -19,16 +20,19 @@ logger = logging.getLogger(__name__)
 
 # Global instances
 xstocks_client: XStocksClient | None = None
+fluxion_client: FluxionClient | None = None
 agent: PortfolioAgent | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global xstocks_client, agent
+    global xstocks_client, fluxion_client, agent
 
     xstocks_client = XStocksClient(api_key=os.getenv("XSTOCKS_API_KEY"))
+    fluxion_client = FluxionClient(rpc_url=os.getenv("MANTLE_RPC_URL", "https://rpc.mantle.xyz"))
     ai_engine = AIEngine(openai_api_key=os.getenv("OPENAI_API_KEY"))
     agent = PortfolioAgent(xstocks_client, ai_engine)
+    logger.info("Fluxion DEX client initialized (Mantle Mainnet)")
 
     # Start with some simulated capital
     agent.deposit(100_000.0)
@@ -257,6 +261,72 @@ async def get_proof_of_reserves():
         return por
     except Exception as e:
         raise HTTPException(500, str(e))
+
+
+# --- Fluxion DEX Endpoints ---
+
+@app.get("/api/fluxion/contracts")
+async def get_fluxion_contracts():
+    """Get Fluxion Network DEX contract addresses on Mantle."""
+    if not fluxion_client:
+        raise HTTPException(500, "Fluxion client not initialized")
+    return {
+        "dex": "Fluxion Network",
+        "network": "Mantle Mainnet",
+        "docs": "https://fluxion-network.gitbook.io/fluxion-network",
+        "site": "https://fluxion.network",
+        "contracts": fluxion_client.get_contract_addresses(),
+    }
+
+
+@app.get("/api/fluxion/pool")
+async def get_fluxion_pool(token_a: str, token_b: str):
+    """Find best Fluxion liquidity pool for a token pair."""
+    if not fluxion_client:
+        raise HTTPException(500, "Fluxion client not initialized")
+    try:
+        result = fluxion_client.find_best_pool(token_a, token_b)
+        return result
+    except Exception as e:
+        raise HTTPException(400, f"Pool lookup failed: {e}")
+
+
+@app.get("/api/fluxion/quote")
+async def get_fluxion_quote(token_in: str, token_out: str, amount_in: str):
+    """Get best swap quote from Fluxion DEX (compares V2 and V3 pools).
+
+    Args:
+        token_in: Input token address
+        token_out: Output token address
+        amount_in: Amount in wei (string to handle large numbers)
+    """
+    if not fluxion_client:
+        raise HTTPException(500, "Fluxion client not initialized")
+    try:
+        result = fluxion_client.get_best_quote(
+            token_in, token_out, int(amount_in)
+        )
+        if "error" in result:
+            raise HTTPException(404, result["error"])
+        return result
+    except ValueError:
+        raise HTTPException(400, "amount_in must be a valid integer (wei)")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Quote failed: {e}")
+
+
+@app.get("/api/fluxion/liquidity/{xstock_address}")
+async def get_xstock_fluxion_liquidity(xstock_address: str):
+    """Check available Fluxion liquidity pools for an xStock token."""
+    if not fluxion_client:
+        raise HTTPException(500, "Fluxion client not initialized")
+    try:
+        result = fluxion_client.get_xstock_liquidity_info(xstock_address)
+        return result
+    except Exception as e:
+        raise HTTPException(400, f"Liquidity check failed: {e}")
 
 
 if __name__ == "__main__":

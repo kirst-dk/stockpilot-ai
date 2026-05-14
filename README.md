@@ -12,6 +12,7 @@ StockPilot AI is an autonomous AI agent that manages portfolios of tokenized equ
 
 - **AI-Driven Portfolio Management** — Three strategies (Balanced Growth, Momentum, Value Investing) with LLM-enhanced analysis
 - **xStocks Integration** — Direct integration with xStocks tokenized equities on Mantle via xChange Atomic RFQ
+- **Fluxion DEX Integration** — Secondary market trading via [Fluxion Network](https://fluxion.network), Mantle's core spot DEX with AMM V2/V3 liquidity
 - **On-Chain Transparency** — All agent actions (buy/sell/rebalance) recorded on Mantle smart contracts
 - **Real-Time Dashboard** — Beautiful UI showing portfolio, market data, AI recommendations, and trade history
 - **ERC-8004 Agent Identity** — Agent has an on-chain identity NFT per hackathon requirements
@@ -43,6 +44,7 @@ stockpilot-ai/
 │   ├── agent/              # AI engine + portfolio agent
 │   ├── strategies/         # Trading strategies (balanced, momentum, value)
 │   ├── xstocks_api/        # xStocks API client
+│   ├── fluxion/            # Fluxion DEX client (secondary market)
 │   └── main.py             # FastAPI application
 ├── frontend/               # Next.js dashboard
 │   └── src/app/            # React UI components
@@ -57,6 +59,7 @@ stockpilot-ai/
 | Backend | Python 3.11, FastAPI, OpenAI API |
 | Frontend | Next.js 14, React 18, TypeScript |
 | xStocks API | REST API (`api.backed.fi/api/v2`) |
+| Fluxion DEX | AMM V2/V3 on Mantle ([fluxion.network](https://fluxion.network)) |
 | Network | Mantle (Chain ID: 5000) |
 | AI | GPT-4o-mini for analysis enhancement |
 
@@ -130,8 +133,26 @@ StockPilot AI integrates with [xStocks](https://xstocks.fi) tokenized equities o
 
 - **Price Feeds**: Real-time prices from xStocks API (`/public/assets/{symbol}/price-data`)
 - **Asset Data**: Token metadata, multipliers, and contract addresses
-- **Atomic RFQ**: Mint/redeem xStocks at live market prices via xChange (Fluxion integration)
+- **Atomic RFQ (xChange)**: Mint/redeem xStocks at live market prices via xStocks' atomic settlement
 - **Supported Assets**: SPYx, NVDAx, AAPLx, TSLAx, MSFTx, AMZNx
+
+## Fluxion DEX Integration
+
+StockPilot AI integrates with [Fluxion Network](https://fluxion.network) — Mantle's core spot DEX — for secondary market trading of xStocks:
+
+- **Smart Routing**: Compares V2 and V3 pools to find optimal execution price
+- **Pool Discovery**: Scans all fee tiers (0.01%, 0.05%, 0.3%, 1%) for available liquidity
+- **Price Quoting**: Real-time quotes via QuoterV2 (V3) and Router (V2)
+- **Liquidity Analysis**: Checks xStock/stablecoin pool availability across all tiers
+
+### Fluxion Contracts on Mantle
+
+| Contract | Address |
+|----------|----------|
+| V2 Router | [`0xd772E655af24Fe5Af92504D613D1Da0d9cFb6408`](https://mantlescan.xyz/address/0xd772E655af24Fe5Af92504D613D1Da0d9cFb6408) |
+| V3 SwapRouter | [`0x5628a59dF0ECAC3f3171f877A94bEb26BA6DFAa0`](https://mantlescan.xyz/address/0x5628a59dF0ECAC3f3171f877A94bEb26BA6DFAa0) |
+| V3 QuoterV2 | [`0x3E4eE18Ac7280813236a1EB850679Da5322E14CE`](https://mantlescan.xyz/address/0x3E4eE18Ac7280813236a1EB850679Da5322E14CE) |
+| V3 Factory | [`0xF883162Ed9c7E8EF604214c964c678E40c9B737C`](https://mantlescan.xyz/address/0xF883162Ed9c7E8EF604214c964c678E40c9B737C) |
 
 ## API Endpoints
 
@@ -150,6 +171,10 @@ StockPilot AI integrates with [xStocks](https://xstocks.fi) tokenized equities o
 | `/api/assets/{symbol}/quote` | GET | Real-time Atomic RFQ quote via xChange |
 | `/api/assets/{symbol}/multiplier` | GET | Asset multiplier (dividends/splits) |
 | `/api/proof-of-reserves` | GET | Proof of reserves for all xStocks |
+| `/api/fluxion/contracts` | GET | Fluxion DEX contract addresses |
+| `/api/fluxion/pool` | GET | Find best liquidity pool for token pair |
+| `/api/fluxion/quote` | GET | Get best swap quote (V2 vs V3) |
+| `/api/fluxion/liquidity/{address}` | GET | Check xStock liquidity on Fluxion |
 
 ## Trading Strategies
 
@@ -166,6 +191,12 @@ Mean reversion strategy — buys on significant pullbacks, trims on extended ral
 
 - **Primary**: AI × RWA — AI-powered management of tokenized real-world assets (xStocks)
 - **Secondary**: AI Trading & Strategy — Quant strategies with on-chain execution
+
+## Ecosystem Partners
+
+- [xStocks](https://xstocks.fi) — Tokenized equities (1:1 backed by real stocks)
+- [Fluxion Network](https://fluxion.network) — Core spot DEX on Mantle (AMM V2/V3)
+- [Mantle Network](https://mantle.xyz) — EVM-compatible L2 with native xStocks support
 
 ## License
 
