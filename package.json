@@ -1,0 +1,22 @@
+{
+  "name": "stockpilot-ai",
+  "version": "1.0.0",
+  "description": "AI-powered portfolio manager for tokenized equities (xStocks) on Mantle Network",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:testnet": "hardhat run scripts/deploy.js --network mantleSepolia",
+    "deploy:mainnet": "hardhat run scripts/deploy.js --network mantleMainnet",
+    "backend": "cd backend && python main.py",
+    "frontend": "cd frontend && npm run dev"
+  },
+  "keywords": ["mantle", "xstocks", "ai", "rwa", "defi", "tokenized-equities"],
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "hardhat": "^2.19.0"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.0"
+  }
+}

@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.local
+cache/
+artifacts/
+typechain-types/
+__pycache__/
+*.pyc
+.next/
+out/
+dist/
+.venv/
+venv/
