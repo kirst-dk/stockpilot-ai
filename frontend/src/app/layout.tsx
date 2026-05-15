@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "StockPilot AI — AI Portfolio Manager for xStocks on Mantle",
   description:
-    "Autonomous AI agent managing tokenized equity portfolios (xStocks) on Mantle Network with on-chain transparency.",
+    "Autonomous AI agent managing tokenized equity portfolios (xStocks) on Mantle Network with on-chain transparency. Powered by GPT-4o-mini, xStocks Atomic RFQ, and Fluxion DEX.",
 };
 
 export default function RootLayout({
@@ -14,6 +14,14 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+          rel="stylesheet"
+        />
+      </head>
       <body>{children}</body>
     </html>
   );
