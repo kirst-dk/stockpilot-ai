@@ -4,6 +4,8 @@
 
 > Built for [Mantle Turing Test Hackathon 2026](https://dorahacks.io/hackathon/mantleturingtesthackathon2026) — AI × RWA Track
 
+**[Live Demo](https://out-jsgkcxkc.devinapps.com)** | **[DoraHacks BUIDL](https://dorahacks.io/buidl/43884)** | **[Contract on Mantle](https://mantlescan.xyz/address/0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9)**
+
 ## Overview
 
 StockPilot AI is an autonomous AI agent that manages portfolios of tokenized equities (xStocks) on Mantle Network. It combines AI-driven analysis with on-chain transparency — every decision the agent makes is recorded permanently on Mantle for verifiable benchmarking.
