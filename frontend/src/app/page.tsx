@@ -10,6 +10,7 @@ import { formatEther } from "viem";
 const CONTRACT = "0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9";
 const NANSEN_API_KEY = process.env.NEXT_PUBLIC_NANSEN_API_KEY || "";
 const ELFA_API_KEY = process.env.NEXT_PUBLIC_ELFA_API_KEY || "";
+const ALTLLM_API_KEY = process.env.NEXT_PUBLIC_ALTLLM_API_KEY || "";
 const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"];
 
 const STRATEGIES = [
@@ -104,11 +105,8 @@ interface NansenToken {
 
 interface ElfaTrending {
   token: string;
-  current_price: number;
-  price_change_24h: number;
-  mindshare: number;
-  sentiment: number;
-  mention_count: number;
+  current_count: number;
+  change_percent: number;
 }
 
 interface ChatMessage {
@@ -125,11 +123,11 @@ const DEMO_NANSEN: NansenToken[] = [
 ];
 
 const DEMO_ELFA: ElfaTrending[] = [
-  { token: "MNT", current_price: 0.82, price_change_24h: 4.5, mindshare: 8.7, sentiment: 0.82, mention_count: 1243 },
-  { token: "ETH", current_price: 3845.20, price_change_24h: 2.1, mindshare: 24.3, sentiment: 0.75, mention_count: 8920 },
-  { token: "BTC", current_price: 104250.00, price_change_24h: 1.8, mindshare: 31.2, sentiment: 0.71, mention_count: 15680 },
-  { token: "SOL", current_price: 178.90, price_change_24h: -1.2, mindshare: 12.1, sentiment: 0.58, mention_count: 4560 },
-  { token: "NVDA", current_price: 131.88, price_change_24h: 3.4, mindshare: 6.8, sentiment: 0.89, mention_count: 2340 },
+  { token: "BTC", current_count: 435, change_percent: -29.15 },
+  { token: "ETH", current_count: 216, change_percent: -10.37 },
+  { token: "SOL", current_count: 105, change_percent: 15.38 },
+  { token: "NVDA", current_count: 86, change_percent: -23.89 },
+  { token: "XRP", current_count: 109, change_percent: -28.76 },
 ];
 
 const AI_RESPONSES: Record<string, string> = {
@@ -224,12 +222,9 @@ export default function Home() {
         const json = await res.json();
         if (json.success && json.data?.data) {
           setElfaData(json.data.data.slice(0, 5).map((t: Record<string, unknown>) => ({
-            token: (t.token as string) || (t.symbol as string) || "—",
-            current_price: Number(t.current_price) || 0,
-            price_change_24h: Number(t.price_change_24h) || 0,
-            mindshare: Number(t.mindshare) || 0,
-            sentiment: Number(t.sentiment) || 0.5,
-            mention_count: Number(t.mention_count) || 0,
+            token: (t.token as string) || "—",
+            current_count: Number(t.current_count) || 0,
+            change_percent: Number(t.change_percent) || 0,
           })));
         }
       } catch { /* use demo data */ }
@@ -243,7 +238,7 @@ export default function Home() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
-  const getAIResponse = useCallback((input: string): string => {
+  const getFallbackResponse = useCallback((input: string): string => {
     const lower = input.toLowerCase();
     if (lower.includes("strat") || lower.includes("recommend") || lower.includes("suggest")) return AI_RESPONSES.strategy;
     if (lower.includes("risk") || lower.includes("safe") || lower.includes("compare")) return AI_RESPONSES.risk;
@@ -259,11 +254,46 @@ export default function Home() {
     setChatInput("");
     setChatMessages(prev => [...prev, { role: "user", content: userMsg }]);
     setChatLoading(true);
-    await new Promise(r => setTimeout(r, 800 + Math.random() * 700));
-    const response = getAIResponse(userMsg);
-    setChatMessages(prev => [...prev, { role: "assistant", content: response }]);
+
+    if (ALTLLM_API_KEY) {
+      try {
+        const systemPrompt = `You are StockPilot AI, an autonomous AI agent for trading tokenized equities (xStocks) on Mantle blockchain. You help users with portfolio strategy, risk assessment, and market analysis.
+
+Available xStocks: SPYx ($587.42), NVDAx ($131.88), AAPLx ($198.55), TSLAx ($178.22), MSFTx ($442.31), AMZNx ($193.67).
+Strategies: Balanced Growth (risk 5/10), Momentum Trading (risk 6/10), Value Investing (risk 4/10).
+Powered by: Nansen (on-chain analytics), ELFA (market sentiment), AltLLM (AI inference).
+Network: Mantle Mainnet (ChainID 5000). Contract: ${CONTRACT}.
+
+Be concise, data-driven, and actionable. Use bullet points. Max 150 words.`;
+
+        const res = await fetch("https://api.altllm.ai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${ALTLLM_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "altllm-standard",
+            messages: [
+              { role: "system", content: systemPrompt },
+              ...chatMessages.slice(-6).map(m => ({ role: m.role, content: m.content })),
+              { role: "user", content: userMsg },
+            ],
+            max_tokens: 300,
+          }),
+        });
+        const json = await res.json();
+        const reply = json.choices?.[0]?.message?.content || getFallbackResponse(userMsg);
+        setChatMessages(prev => [...prev, { role: "assistant", content: reply }]);
+      } catch {
+        setChatMessages(prev => [...prev, { role: "assistant", content: getFallbackResponse(userMsg) }]);
+      }
+    } else {
+      await new Promise(r => setTimeout(r, 800 + Math.random() * 700));
+      setChatMessages(prev => [...prev, { role: "assistant", content: getFallbackResponse(userMsg) }]);
+    }
     setChatLoading(false);
-  }, [chatInput, chatLoading, getAIResponse]);
+  }, [chatInput, chatLoading, chatMessages, getFallbackResponse]);
 
   const handleExecute = () => {
     if (!walletConnected) return;
@@ -813,16 +843,16 @@ export default function Home() {
                 {(elfaLoading ? [] : elfaData.slice(0, 3)).map((t, i) => (
                   <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-white/[0.02] border border-white/5">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-white/80">{t.token}</span>
-                      <span className={`text-[10px] font-mono ${t.price_change_24h >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                        {t.price_change_24h >= 0 ? "+" : ""}{t.price_change_24h.toFixed(1)}%
+                      <span className="text-xs font-bold text-white/80 uppercase">{t.token}</span>
+                      <span className={`text-[10px] font-mono ${t.change_percent >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                        {t.change_percent >= 0 ? "+" : ""}{t.change_percent.toFixed(1)}%
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <div className="w-12 h-1.5 rounded-full bg-white/5 overflow-hidden">
-                        <div className="h-full rounded-full bg-gradient-to-r from-amber-500 to-emerald-500" style={{ width: `${(t.sentiment * 100)}%` }} />
+                      <div className="w-16 h-1.5 rounded-full bg-white/5 overflow-hidden">
+                        <div className="h-full rounded-full bg-gradient-to-r from-amber-500 to-emerald-500" style={{ width: `${Math.min(100, (t.current_count / 5))}%` }} />
                       </div>
-                      <span className="text-[9px] text-white/30">{t.mention_count.toLocaleString()}</span>
+                      <span className="text-[9px] text-white/30">{t.current_count} mentions</span>
                     </div>
                   </div>
                 ))}
