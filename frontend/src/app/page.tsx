@@ -1,8 +1,11 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence, useInView } from "framer-motion";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
+import { ConnectButton } from "@rainbow-me/rainbowkit";
+import { useAccount, useBalance } from "wagmi";
+import { formatEther } from "viem";
 
 const CONTRACT = "0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9";
 const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"];
@@ -97,28 +100,35 @@ function FadeIn({ children, delay = 0, className = "" }: { children: React.React
 
 export default function Home() {
   const [activeStrategy, setActiveStrategy] = useState(0);
-  const [walletConnected, setWalletConnected] = useState(false);
   const [agentRunning, setAgentRunning] = useState(false);
   const [showActivation, setShowActivation] = useState(false);
   const [activationStep, setActivationStep] = useState(0);
   const dashboardRef = useRef<HTMLDivElement>(null);
+  const prevConnected = useRef(false);
 
+  const { address, isConnected } = useAccount();
+  const { data: balance } = useBalance({ address });
+
+  const walletConnected = isConnected;
   const strategy = STRATEGIES[activeStrategy];
+
+  const shortAddress = address
+    ? `${address.slice(0, 6)}...${address.slice(-4)}`
+    : "";
 
   const scrollToDashboard = () => {
     dashboardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const handleConnect = () => {
-    setWalletConnected(true);
-    setTimeout(() => scrollToDashboard(), 300);
-  };
+  useEffect(() => {
+    if (isConnected && !prevConnected.current) {
+      setTimeout(() => scrollToDashboard(), 500);
+    }
+    prevConnected.current = isConnected;
+  }, [isConnected]);
 
   const handleExecute = () => {
-    if (!walletConnected) {
-      handleConnect();
-      return;
-    }
+    if (!walletConnected) return;
     setShowActivation(true);
     setActivationStep(0);
     setTimeout(() => setActivationStep(1), 800);
@@ -172,16 +182,23 @@ export default function Home() {
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               Mainnet
             </a>
-            <button
-              onClick={handleConnect}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-300 ${
-                walletConnected
-                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
-                  : "bg-white text-black hover:bg-white/90 hover:shadow-lg hover:shadow-white/10 hover:-translate-y-0.5"
-              }`}
-            >
-              {walletConnected ? "0x25F8...19cF" : "Connect Wallet"}
-            </button>
+            <ConnectButton.Custom>
+              {({ account, chain, openConnectModal, openAccountModal, mounted }) => {
+                const connected = mounted && account && chain;
+                return (
+                  <button
+                    onClick={connected ? openAccountModal : openConnectModal}
+                    className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-300 ${
+                      connected
+                        ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
+                        : "bg-white text-black hover:bg-white/90 hover:shadow-lg hover:shadow-white/10 hover:-translate-y-0.5"
+                    }`}
+                  >
+                    {connected ? account.displayName : "Connect Wallet"}
+                  </button>
+                );
+              }}
+            </ConnectButton.Custom>
           </div>
         </div>
       </nav>
@@ -203,13 +220,20 @@ export default function Home() {
             Choose a strategy — the AI handles everything. Every trade recorded on-chain.
           </p>
           <div className="flex flex-col sm:flex-row items-start gap-4">
-            <button
-              onClick={walletConnected ? scrollToDashboard : handleConnect}
-              className="group px-8 py-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold text-base transition-all duration-300 hover:shadow-2xl hover:shadow-blue-500/25 hover:-translate-y-1 flex items-center gap-2"
-            >
-              {walletConnected ? "Choose Strategy ↓" : "Connect Wallet & Start"}
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="group-hover:translate-x-1 transition-transform"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            </button>
+            <ConnectButton.Custom>
+              {({ account, chain, openConnectModal, mounted }) => {
+                const connected = mounted && account && chain;
+                return (
+                  <button
+                    onClick={connected ? scrollToDashboard : openConnectModal}
+                    className="group px-8 py-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold text-base transition-all duration-300 hover:shadow-2xl hover:shadow-blue-500/25 hover:-translate-y-1 flex items-center gap-2"
+                  >
+                    {connected ? "Choose Strategy ↓" : "Connect Wallet & Start"}
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="group-hover:translate-x-1 transition-transform"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </button>
+                );
+              }}
+            </ConnectButton.Custom>
             <a href="https://github.com/kirst-dk/stockpilot-ai" target="_blank" rel="noreferrer" className="px-8 py-4 rounded-xl border border-white/10 text-white/70 hover:text-white hover:border-white/20 font-medium text-base transition-all duration-300 hover:-translate-y-0.5">
               View Source
             </a>
@@ -381,6 +405,20 @@ export default function Home() {
             </button>
           ))}
         </div>
+
+        {/* Wallet info banner */}
+        {walletConnected && address && (
+          <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-8 p-4 rounded-xl border border-blue-500/20 bg-blue-500/[0.03] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-xs font-bold">W</div>
+              <div>
+                <div className="text-sm font-semibold text-white/90">{shortAddress}</div>
+                <div className="text-xs text-white/40">Mantle Mainnet · {balance ? `${Number(formatEther(balance.value)).toFixed(4)} MNT` : "Loading..."}</div>
+              </div>
+            </div>
+            <div className="text-xs text-white/50">Select a strategy below and click Execute to start the AI agent</div>
+          </motion.div>
+        )}
 
         {/* Strategy details + chart */}
         <AnimatePresence mode="wait">
@@ -583,12 +621,19 @@ export default function Home() {
             </h2>
             <p className="text-white/40 text-lg mb-8 max-w-md mx-auto">Connect your wallet, pick a strategy, let the agent work. All on-chain, all transparent.</p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <button
-                onClick={walletConnected ? scrollToDashboard : handleConnect}
-                className="px-8 py-4 rounded-xl bg-white text-black font-bold text-base hover:shadow-2xl hover:shadow-white/10 hover:-translate-y-1 transition-all duration-300"
-              >
-                {walletConnected ? (agentRunning ? "View Dashboard ↑" : "Choose Strategy ↑") : "Connect Wallet →"}
-              </button>
+              <ConnectButton.Custom>
+                {({ account, chain, openConnectModal, mounted }) => {
+                  const connected = mounted && account && chain;
+                  return (
+                    <button
+                      onClick={connected ? scrollToDashboard : openConnectModal}
+                      className="px-8 py-4 rounded-xl bg-white text-black font-bold text-base hover:shadow-2xl hover:shadow-white/10 hover:-translate-y-1 transition-all duration-300"
+                    >
+                      {connected ? (agentRunning ? "View Dashboard ↑" : "Choose Strategy ↑") : "Connect Wallet →"}
+                    </button>
+                  );
+                }}
+              </ConnectButton.Custom>
               <a href={`https://mantlescan.xyz/address/${CONTRACT}`} target="_blank" rel="noreferrer" className="px-8 py-4 rounded-xl border border-white/10 text-white/60 hover:text-white hover:border-white/20 font-medium text-base transition-all">
                 Verify Contract
               </a>

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import Web3Providers from "./providers";
 
 export const metadata: Metadata = {
   title: "StockPilot AI — AI Portfolio Manager for xStocks on Mantle",
@@ -22,7 +23,9 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        <Web3Providers>{children}</Web3Providers>
+      </body>
     </html>
   );
 }
