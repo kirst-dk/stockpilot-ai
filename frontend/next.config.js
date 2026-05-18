@@ -4,6 +4,7 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  transpilePackages: ["@0xsquid/widget", "@0xsquid/react-hooks"],
 };
 
 module.exports = nextConfig;
