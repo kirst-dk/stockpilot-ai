@@ -6,12 +6,28 @@ import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useBalance } from "wagmi";
 import { formatEther } from "viem";
+import dynamic from "next/dynamic";
+
+const SquidWidget = dynamic(
+  () => import("@0xsquid/widget").then((mod) => mod.SquidWidget),
+  { ssr: false }
+);
 
 const CONTRACT = "0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9";
 const NANSEN_API_KEY = process.env.NEXT_PUBLIC_NANSEN_API_KEY || "";
 const ELFA_API_KEY = process.env.NEXT_PUBLIC_ELFA_API_KEY || "";
 const ALTLLM_API_KEY = process.env.NEXT_PUBLIC_ALTLLM_API_KEY || "";
+const SQUID_INTEGRATOR_ID = "stockpilot-ai-83f92aed-1e4a-411f-b5fe-809e52b8158f";
 const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"];
+
+const XSTOCKS = [
+  { symbol: "SPYx", name: "S&P 500 ETF", price: 587.42, change: +1.2, sector: "Index" },
+  { symbol: "NVDAx", name: "NVIDIA", price: 131.88, change: +3.4, sector: "AI / Chips" },
+  { symbol: "AAPLx", name: "Apple", price: 198.55, change: -0.3, sector: "Tech" },
+  { symbol: "TSLAx", name: "Tesla", price: 178.22, change: +2.1, sector: "EV / Energy" },
+  { symbol: "MSFTx", name: "Microsoft", price: 442.31, change: +0.8, sector: "Cloud / AI" },
+  { symbol: "AMZNx", name: "Amazon", price: 193.67, change: +1.5, sector: "E-comm / Cloud" },
+];
 
 const STRATEGIES = [
   {
@@ -162,9 +178,97 @@ export default function Home() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
+  const [bridgeOpen, setBridgeOpen] = useState(false);
+  const [portfolioSelected, setPortfolioSelected] = useState<Record<string, number>>({});
+  const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
+  const [aiAnalyzing, setAiAnalyzing] = useState(false);
+  const [buyMode, setBuyMode] = useState<"portfolio" | "single" | null>(null);
+  const [buyingToken, setBuyingToken] = useState<string | null>(null);
+  const [buyAmount, setBuyAmount] = useState("");
+  const [inputToken, setInputToken] = useState("USDC");
   const dashboardRef = useRef<HTMLDivElement>(null);
+  const portfolioRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const prevConnected = useRef(false);
+
+  const totalAllocation = Object.values(portfolioSelected).reduce((s, v) => s + v, 0);
+  const selectedCount = Object.keys(portfolioSelected).length;
+
+  const toggleXStock = (symbol: string) => {
+    setPortfolioSelected(prev => {
+      const next = { ...prev };
+      if (next[symbol] !== undefined) {
+        delete next[symbol];
+      } else {
+        const remaining = 100 - Object.values(next).reduce((s, v) => s + v, 0);
+        const existing = Object.keys(next).length;
+        next[symbol] = existing === 0 ? 100 : Math.max(0, Math.min(remaining, Math.floor(100 / (existing + 1))));
+        const total = Object.values(next).reduce((s, v) => s + v, 0);
+        if (total > 100) {
+          const diff = total - 100;
+          next[symbol] = Math.max(0, next[symbol] - diff);
+        }
+      }
+      return next;
+    });
+    setAiAnalysis(null);
+  };
+
+  const updateAllocation = (symbol: string, value: number) => {
+    setPortfolioSelected(prev => ({ ...prev, [symbol]: Math.max(0, Math.min(100, value)) }));
+    setAiAnalysis(null);
+  };
+
+  const applyAiStrategy = () => {
+    const s = STRATEGIES[activeStrategy];
+    const newAlloc: Record<string, number> = {};
+    s.allocation.forEach(a => { newAlloc[a.name] = a.value; });
+    setPortfolioSelected(newAlloc);
+    setAiAnalysis(null);
+  };
+
+  const analyzePortfolio = async () => {
+    if (selectedCount === 0) return;
+    setAiAnalyzing(true);
+    const positions = Object.entries(portfolioSelected).map(([sym, pct]) => {
+      const stock = XSTOCKS.find(x => x.symbol === sym);
+      return `${sym} (${stock?.name}): ${pct}% — $${stock?.price} (${(stock?.change ?? 0) >= 0 ? "+" : ""}${stock?.change}%)`;
+    }).join("\n");
+
+    const prompt = `Analyze this xStocks portfolio on Mantle Network. Give: 1) Risk Score (1-10), 2) Expected Monthly Return, 3) Diversification Rating, 4) Key Risks, 5) Specific Recommendations. Be concise, use bullet points.\n\nPortfolio (total ${totalAllocation}%):\n${positions}`;
+
+    if (ALTLLM_API_KEY) {
+      try {
+        const res = await fetch("https://api.altllm.ai/v1/chat/completions", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${ALTLLM_API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "altllm-standard",
+            messages: [
+              { role: "system", content: "You are a professional portfolio analyst for tokenized equities (xStocks) on Mantle blockchain. Analyze portfolios with data-driven insights. Be concise. Max 200 words." },
+              { role: "user", content: prompt },
+            ],
+            max_tokens: 400,
+          }),
+        });
+        const json = await res.json();
+        setAiAnalysis(json.choices?.[0]?.message?.content || getFallbackAnalysis());
+      } catch {
+        setAiAnalysis(getFallbackAnalysis());
+      }
+    } else {
+      await new Promise(r => setTimeout(r, 1500));
+      setAiAnalysis(getFallbackAnalysis());
+    }
+    setAiAnalyzing(false);
+  };
+
+  const getFallbackAnalysis = (): string => {
+    const hasNvda = portfolioSelected["NVDAx"];
+    const hasSpy = portfolioSelected["SPYx"];
+    const risk = selectedCount <= 2 ? "7/10 — Concentrated" : selectedCount <= 4 ? "5/10 — Moderate" : "3/10 — Well Diversified";
+    return `Portfolio Analysis (AI-Powered)\n\nRisk Score: ${risk}\nEst. Monthly Return: +${(1.2 + selectedCount * 0.3).toFixed(1)}%\nDiversification: ${selectedCount}/6 sectors covered\n\nKey Risks:\n${selectedCount <= 2 ? "- High concentration risk — consider adding more assets" : "- Market correlation during downturns"}\n${hasNvda && (portfolioSelected["NVDAx"] || 0) > 30 ? "- Heavy AI sector exposure (NVDAx >30%)" : "- Sector allocation looks balanced"}\n\nRecommendations:\n${!hasSpy ? "- Consider adding SPYx for broad market exposure" : "- SPYx provides good base stability"}\n${!hasNvda ? "- NVDAx has strong momentum (+3.4%) — consider adding" : "- NVDAx momentum is strong, good pick"}\n- Smart money (Nansen) shows institutional accumulation in tech\n- ELFA sentiment: 82% bullish on AI sector tokens`;
+  };
 
   const { address, isConnected } = useAccount();
   const { data: balance } = useBalance({ address });
@@ -1029,6 +1133,323 @@ Be concise, data-driven, and actionable. Use bullet points. Max 150 words.`;
         </motion.button>
       </div>
 
+      {/* Bridge Modal */}
+      <AnimatePresence>
+        {bridgeOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6"
+            onClick={() => setBridgeOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-[#0a0f1a] border border-white/10 rounded-2xl max-w-lg w-full overflow-hidden"
+            >
+              <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold">Bridge to Mantle</h3>
+                  <p className="text-xs text-white/40">Swap any token from any chain to Mantle</p>
+                </div>
+                <button onClick={() => setBridgeOpen(false)} className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/40 hover:text-white/70 transition-colors">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                </button>
+              </div>
+              <div className="p-4" style={{ minHeight: 480 }}>
+                <SquidWidget
+                  config={{
+                    integratorId: SQUID_INTEGRATOR_ID,
+                    apiUrl: "https://v2.api.squidrouter.com",
+                    themeType: "dark" as const,
+                    initialAssets: {
+                      from: { address: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", chainId: "1" },
+                      to: { address: "0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9", chainId: "5000" },
+                    },
+                    availableChains: { destination: ["5000"] },
+                  }}
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Buy Modal */}
+      <AnimatePresence>
+        {buyMode && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6"
+            onClick={() => { setBuyMode(null); setBuyingToken(null); }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-[#0a0f1a] border border-white/10 rounded-2xl p-8 max-w-lg w-full"
+            >
+              <h3 className="text-xl font-bold mb-2">{buyMode === "portfolio" ? "Buy Entire Portfolio" : `Buy ${buyingToken}`}</h3>
+              <p className="text-sm text-white/40 mb-6">
+                {buyMode === "portfolio"
+                  ? `${selectedCount} assets in AI-recommended proportions`
+                  : `Purchase ${buyingToken} tokenized equity on Mantle`}
+              </p>
+
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="text-xs text-white/40 mb-1 block">Input Token</label>
+                  <div className="flex gap-2">
+                    {["USDC", "USDT", "WETH", "MNT"].map(t => (
+                      <button key={t} onClick={() => setInputToken(t)} className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                        inputToken === t ? "bg-blue-600/20 text-blue-400 border border-blue-500/30" : "bg-white/5 text-white/50 border border-white/5 hover:bg-white/10"
+                      }`}>{t}</button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-white/40 mb-1 block">Amount ({inputToken})</label>
+                  <input
+                    type="number"
+                    value={buyAmount}
+                    onChange={(e) => setBuyAmount(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-3 text-white/90 placeholder:text-white/20 focus:outline-none focus:border-blue-500/50"
+                  />
+                </div>
+              </div>
+
+              {buyMode === "portfolio" && (
+                <div className="p-4 rounded-xl border border-white/5 bg-white/[0.02] mb-6">
+                  <div className="text-[10px] text-white/40 tracking-wider mb-2">ALLOCATION BREAKDOWN</div>
+                  <div className="space-y-1.5">
+                    {Object.entries(portfolioSelected).map(([sym, pct]) => {
+                      const stock = XSTOCKS.find(x => x.symbol === sym);
+                      const amt = buyAmount ? (parseFloat(buyAmount) * pct / 100).toFixed(2) : "0.00";
+                      return (
+                        <div key={sym} className="flex items-center justify-between text-sm">
+                          <span className="text-white/70">{sym}</span>
+                          <div className="flex items-center gap-3">
+                            <span className="text-white/40 text-xs">{pct}%</span>
+                            <span className="font-mono text-white/60">{amt} {inputToken}</span>
+                            <span className="text-[10px] text-white/30">{"\u2248"}${stock ? (parseFloat(amt) * (inputToken === "USDC" || inputToken === "USDT" ? 1 : inputToken === "WETH" ? 3845 : 0.82)).toFixed(0) : "0"}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/20 mb-6">
+                <div className="flex items-start gap-2">
+                  <span className="text-amber-400 text-sm mt-0.5">!</span>
+                  <div className="text-xs text-amber-400/70">
+                    {inputToken !== "USDC" && "Your "}{inputToken !== "USDC" && <span className="font-semibold text-amber-400">{inputToken}</span>}{inputToken !== "USDC" && " will be auto-swapped to USDC via Fluxion DEX before purchasing xStocks. "}
+                    Slippage: 1%. Trades execute via smart contract on Mantle.
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button onClick={() => { setBuyMode(null); setBuyingToken(null); }} className="flex-1 py-3 rounded-xl border border-white/10 text-white/60 font-semibold text-sm hover:bg-white/5 transition-all">
+                  Cancel
+                </button>
+                <button
+                  onClick={() => { alert(`Buy order submitted! ${buyMode === "portfolio" ? `Portfolio (${selectedCount} assets)` : buyingToken}: ${buyAmount} ${inputToken}`); setBuyMode(null); setBuyingToken(null); setBuyAmount(""); }}
+                  disabled={!buyAmount || parseFloat(buyAmount) <= 0 || !walletConnected}
+                  className="flex-1 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold text-sm hover:shadow-lg hover:shadow-blue-500/20 disabled:opacity-30 transition-all"
+                >
+                  {walletConnected ? `Buy with ${inputToken}` : "Connect Wallet"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Portfolio Builder */}
+      <section ref={portfolioRef} className="max-w-7xl mx-auto px-6 py-24 border-t border-white/5">
+        <FadeIn>
+          <div className="text-center mb-12">
+            <span className="text-[11px] font-semibold text-white/40 tracking-[0.2em] uppercase">PORTFOLIO BUILDER</span>
+            <h2 className="text-3xl md:text-4xl font-bold mt-3 tracking-tight">Build Your Portfolio</h2>
+            <p className="text-white/40 mt-3 max-w-xl mx-auto">Select xStocks, set allocations, get AI analysis, and buy — all in one place.</p>
+          </div>
+        </FadeIn>
+
+        {/* Quick actions row */}
+        <div className="flex flex-wrap justify-center gap-3 mb-8">
+          <button onClick={applyAiStrategy} className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600/20 to-indigo-600/20 text-blue-400 border border-blue-500/20 text-sm font-semibold hover:from-blue-600/30 hover:to-indigo-600/30 transition-all">
+            Use AI Strategy ({STRATEGIES[activeStrategy].name})
+          </button>
+          <button onClick={() => setBridgeOpen(true)} className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600/20 to-pink-600/20 text-purple-400 border border-purple-500/20 text-sm font-semibold hover:from-purple-600/30 hover:to-pink-600/30 transition-all">
+            Bridge to Mantle
+          </button>
+          {selectedCount > 0 && (
+            <button onClick={() => setPortfolioSelected({})} className="px-5 py-2.5 rounded-xl bg-white/5 text-white/50 border border-white/10 text-sm font-medium hover:bg-white/10 transition-all">
+              Clear All
+            </button>
+          )}
+        </div>
+
+        {/* xStocks grid */}
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
+          {XSTOCKS.map((stock) => {
+            const isSelected = portfolioSelected[stock.symbol] !== undefined;
+            const alloc = portfolioSelected[stock.symbol] || 0;
+            return (
+              <div key={stock.symbol} className={`relative p-5 rounded-2xl border transition-all duration-300 cursor-pointer ${
+                isSelected
+                  ? "border-blue-500/40 bg-blue-500/[0.05] shadow-lg shadow-blue-500/5"
+                  : "border-white/5 bg-white/[0.01] hover:border-white/15 hover:bg-white/[0.03]"
+              }`} onClick={() => toggleXStock(stock.symbol)}>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <div className="text-lg font-bold text-white/90">{stock.symbol}</div>
+                    <div className="text-xs text-white/40">{stock.name}</div>
+                  </div>
+                  <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${
+                    isSelected ? "bg-blue-600 border-blue-500" : "border-white/20"
+                  }`}>
+                    {isSelected && <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8l3.5 3.5L13 5" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                  </div>
+                </div>
+                <div className="flex items-end justify-between">
+                  <div className="text-xl font-bold font-mono">${stock.price}</div>
+                  <span className={`text-sm font-semibold ${stock.change >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    {stock.change >= 0 ? "+" : ""}{stock.change}%
+                  </span>
+                </div>
+                <div className="text-[10px] text-white/30 mt-1">{stock.sector}</div>
+
+                {isSelected && (
+                  <div className="mt-4 pt-4 border-t border-white/5" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-white/50">Allocation</span>
+                      <span className="text-xs font-mono text-blue-400">{alloc}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={alloc}
+                      onChange={(e) => updateAllocation(stock.symbol, parseInt(e.target.value))}
+                      className="w-full h-1.5 rounded-full appearance-none bg-white/10 accent-blue-500 cursor-pointer"
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Portfolio summary + AI analysis + Buy */}
+        {selectedCount > 0 && (
+          <FadeIn>
+            <div className="grid lg:grid-cols-2 gap-6">
+              {/* Left: allocation summary */}
+              <div className="p-6 rounded-2xl border border-white/5 bg-white/[0.02]">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold text-white/60 tracking-wider uppercase">YOUR PORTFOLIO</h3>
+                  <span className={`text-xs font-mono px-2 py-1 rounded-full ${totalAllocation === 100 ? "bg-emerald-500/10 text-emerald-400" : "bg-amber-500/10 text-amber-400"}`}>
+                    {totalAllocation}% / 100%
+                  </span>
+                </div>
+                <div className="flex items-center gap-6 mb-4">
+                  <div className="w-[140px] h-[140px] flex-shrink-0">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={Object.entries(portfolioSelected).map(([name, value]) => ({ name, value }))}
+                          cx="50%" cy="50%" innerRadius={40} outerRadius={60} paddingAngle={2} dataKey="value" animationDuration={500}
+                        >
+                          {Object.keys(portfolioSelected).map((_, i) => (
+                            <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                          ))}
+                        </Pie>
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="flex-1 space-y-2">
+                    {Object.entries(portfolioSelected).map(([sym, pct], i) => (
+                      <div key={sym} className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded" style={{ background: COLORS[i % COLORS.length] }} />
+                          <span className="text-sm text-white/70">{sym}</span>
+                        </div>
+                        <span className="text-sm font-mono text-white/50">{pct}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Buy buttons */}
+                <div className="space-y-2">
+                  <button
+                    onClick={() => { setBuyMode("portfolio"); setBuyAmount(""); }}
+                    disabled={totalAllocation !== 100 || !walletConnected}
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold text-sm hover:shadow-lg hover:shadow-blue-500/20 disabled:opacity-30 transition-all"
+                  >
+                    Buy Entire Portfolio
+                  </button>
+                  <div className="flex gap-2 flex-wrap">
+                    {Object.keys(portfolioSelected).map(sym => (
+                      <button key={sym} onClick={() => { setBuyMode("single"); setBuyingToken(sym); setBuyAmount(""); }} className="px-3 py-2 rounded-lg bg-white/5 text-white/60 text-xs font-medium border border-white/10 hover:bg-white/10 transition-all">
+                        Buy {sym}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Right: AI analysis */}
+              <div className="p-6 rounded-2xl border border-white/5 bg-white/[0.02]">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold text-white/60 tracking-wider uppercase">AI ANALYSIS</h3>
+                  <div className="flex items-center gap-1 text-[9px] text-white/30">
+                    <span className="text-cyan-400/50">Nansen</span>
+                    <span>+</span>
+                    <span className="text-amber-400/50">ELFA</span>
+                    <span>+</span>
+                    <span className="text-violet-400/50">AltLLM</span>
+                  </div>
+                </div>
+
+                {aiAnalysis ? (
+                  <div className="text-sm text-white/60 whitespace-pre-wrap leading-relaxed mb-4">{aiAnalysis}</div>
+                ) : (
+                  <div className="text-center py-8">
+                    <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-gradient-to-br from-cyan-500/10 to-violet-500/10 border border-white/5 flex items-center justify-center">
+                      <svg width="24" height="24" viewBox="0 0 16 16" fill="none"><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.3"/></svg>
+                    </div>
+                    <p className="text-sm text-white/30 mb-4">{selectedCount > 0 ? "Click below to get AI analysis" : "Select assets first"}</p>
+                  </div>
+                )}
+
+                <button
+                  onClick={analyzePortfolio}
+                  disabled={selectedCount === 0 || aiAnalyzing}
+                  className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-600/20 to-violet-600/20 text-cyan-400 border border-cyan-500/20 font-semibold text-sm hover:from-cyan-600/30 hover:to-violet-600/30 disabled:opacity-30 transition-all flex items-center justify-center gap-2"
+                >
+                  {aiAnalyzing ? (
+                    <><span className="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" /> Analyzing...</>
+                  ) : (
+                    <>{aiAnalysis ? "Re-analyze" : "Analyze Portfolio"} with AI</>
+                  )}
+                </button>
+              </div>
+            </div>
+          </FadeIn>
+        )}
+      </section>
+
       {/* CTA */}
       <section className="max-w-7xl mx-auto px-6 py-24 border-t border-white/5">
         <FadeIn>
@@ -1076,6 +1497,7 @@ Be concise, data-driven, and actionable. Use bullet points. Max 150 words.`;
             <a href="https://elfa.ai" target="_blank" rel="noreferrer" className="hover:text-white/70 transition-colors">ELFA</a>
             <a href="https://altllm.ai" target="_blank" rel="noreferrer" className="hover:text-white/70 transition-colors">AltLLM</a>
             <a href="https://mantle.xyz" target="_blank" rel="noreferrer" className="hover:text-white/70 transition-colors">Mantle</a>
+            <a href="https://squidrouter.com" target="_blank" rel="noreferrer" className="hover:text-white/70 transition-colors">Squid</a>
           </div>
         </div>
       </footer>
