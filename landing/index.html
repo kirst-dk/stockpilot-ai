@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StockPilot AI — AI-Powered Portfolio Manager on Mantle</title>
+<meta name="description" content="AI-powered autonomous portfolio manager for tokenized equities (xStocks) on Mantle Network. Bridge, build, analyze, and buy — all in one place.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233b82f6'/%3E%3Cpath d='M6 22L11 13L16 17L21 9L26 15' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{font-family:'Inter',system-ui,sans-serif;background:#030712;color:#e5e7eb;line-height:1.6;overflow-x:hidden}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:#0a0f1a}
+::-webkit-scrollbar-thumb{background:#374151;border-radius:3px}
+
+/* Navbar */
+nav{position:fixed;top:0;width:100%;z-index:100;backdrop-filter:blur(20px);background:rgba(3,7,18,.8);border-bottom:1px solid rgba(255,255,255,.05);padding:0 2rem}
+.nav-inner{max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;height:72px}
+.logo{display:flex;align-items:center;gap:10px;text-decoration:none}
+.logo-icon{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#6366f1);display:flex;align-items:center;justify-content:center;box-shadow:0 4px 15px rgba(59,130,246,.3)}
+.logo-text{font-size:18px;font-weight:800;color:white;letter-spacing:-.5px}
+.logo-badge{font-size:9px;font-weight:700;color:#818cf8;background:rgba(99,102,241,.15);padding:2px 8px;border-radius:12px;border:1px solid rgba(99,102,241,.25)}
+.nav-links{display:flex;align-items:center;gap:32px}
+.nav-links a{color:#9ca3af;text-decoration:none;font-size:14px;font-weight:500;transition:color .2s}
+.nav-links a:hover{color:white}
+.btn-launch{background:linear-gradient(135deg,#3b82f6,#6366f1);color:white;padding:10px 24px;border-radius:12px;font-weight:600;font-size:14px;text-decoration:none;transition:all .3s;box-shadow:0 4px 15px rgba(59,130,246,.3)}
+.btn-launch:hover{transform:translateY(-2px);box-shadow:0 8px 25px rgba(59,130,246,.4)}
+
+/* Hero */
+.hero{min-height:100vh;display:flex;align-items:center;justify-content:center;position:relative;padding:120px 2rem 80px;text-align:center}
+.hero-bg{position:absolute;inset:0;overflow:hidden}
+.hero-bg::before{content:'';position:absolute;top:-200px;left:50%;transform:translateX(-50%);width:800px;height:800px;background:radial-gradient(circle,rgba(99,102,241,.12),transparent 70%);border-radius:50%}
+.hero-bg::after{content:'';position:absolute;bottom:-100px;right:-100px;width:600px;height:600px;background:radial-gradient(circle,rgba(59,130,246,.08),transparent 70%);border-radius:50%}
+.hero-grid{position:absolute;inset:0;opacity:.03;background-image:linear-gradient(rgba(255,255,255,.1) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.1) 1px,transparent 1px);background-size:60px 60px}
+.hero-content{position:relative;z-index:1;max-width:800px}
+.hero-badge{display:inline-flex;align-items:center;gap:8px;padding:6px 16px;border-radius:24px;background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);font-size:13px;font-weight:600;color:#818cf8;margin-bottom:24px}
+.hero-badge .dot{width:6px;height:6px;border-radius:50%;background:#818cf8;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.hero h1{font-size:clamp(2.5rem,6vw,4.5rem);font-weight:900;letter-spacing:-2px;line-height:1.1;margin-bottom:20px}
+.hero h1 .gradient{background:linear-gradient(135deg,#60a5fa,#818cf8,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero p{font-size:clamp(1rem,2vw,1.25rem);color:#9ca3af;max-width:600px;margin:0 auto 40px;line-height:1.7}
+.hero-cta{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
+.btn-primary{background:linear-gradient(135deg,#3b82f6,#6366f1);color:white;padding:16px 40px;border-radius:14px;font-weight:700;font-size:16px;text-decoration:none;transition:all .3s;display:inline-flex;align-items:center;gap:8px;box-shadow:0 4px 20px rgba(59,130,246,.3)}
+.btn-primary:hover{transform:translateY(-3px);box-shadow:0 12px 35px rgba(59,130,246,.4)}
+.btn-secondary{background:rgba(255,255,255,.05);color:white;padding:16px 40px;border-radius:14px;font-weight:600;font-size:16px;text-decoration:none;transition:all .3s;border:1px solid rgba(255,255,255,.1)}
+.btn-secondary:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.2)}
+.hero-stats{display:flex;justify-content:center;gap:48px;margin-top:60px;flex-wrap:wrap}
+.stat{text-align:center}
+.stat-value{font-size:2rem;font-weight:800;background:linear-gradient(135deg,#60a5fa,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.stat-label{font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:1.5px;margin-top:4px;font-weight:600}
+
+/* Sections */
+section{padding:100px 2rem}
+.section-inner{max-width:1200px;margin:0 auto}
+.section-label{font-size:12px;font-weight:700;color:#818cf8;text-transform:uppercase;letter-spacing:2px;margin-bottom:12px}
+.section-title{font-size:clamp(2rem,4vw,3rem);font-weight:900;letter-spacing:-1px;margin-bottom:16px;color:white}
+.section-desc{font-size:16px;color:#6b7280;max-width:600px;line-height:1.7}
+
+/* Features */
+.features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;margin-top:48px}
+.feature-card{padding:32px;border-radius:20px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);transition:all .3s;position:relative;overflow:hidden}
+.feature-card:hover{border-color:rgba(99,102,241,.2);background:rgba(255,255,255,.04);transform:translateY(-4px)}
+.feature-icon{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;margin-bottom:20px;font-size:22px}
+.fi-purple{background:rgba(168,85,247,.12)}
+.fi-blue{background:rgba(59,130,246,.12)}
+.fi-green{background:rgba(16,185,129,.12)}
+.fi-amber{background:rgba(245,158,11,.12)}
+.fi-pink{background:rgba(236,72,153,.12)}
+.fi-indigo{background:rgba(99,102,241,.12)}
+.feature-card h3{font-size:18px;font-weight:700;margin-bottom:8px;color:white}
+.feature-card p{font-size:14px;color:#6b7280;line-height:1.6}
+.feature-tag{display:inline-block;font-size:11px;font-weight:700;padding:4px 10px;border-radius:8px;margin-top:12px}
+.ft-purple{color:#c084fc;background:rgba(168,85,247,.1)}
+.ft-blue{color:#60a5fa;background:rgba(59,130,246,.1)}
+.ft-green{color:#34d399;background:rgba(16,185,129,.1)}
+.ft-amber{color:#fbbf24;background:rgba(245,158,11,.1)}
+.ft-pink{color:#f472b6;background:rgba(236,72,153,.1)}
+.ft-indigo{color:#818cf8;background:rgba(99,102,241,.1)}
+
+/* Flow */
+.flow-section{background:rgba(255,255,255,.01);border-top:1px solid rgba(255,255,255,.04);border-bottom:1px solid rgba(255,255,255,.04)}
+.flow-steps{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:48px;flex-wrap:wrap}
+.flow-step{padding:14px 24px;border-radius:14px;font-size:14px;font-weight:700;white-space:nowrap}
+.flow-arrow{color:rgba(255,255,255,.15);font-size:18px}
+.fs-1{background:rgba(168,85,247,.1);color:#c084fc;border:1px solid rgba(168,85,247,.2)}
+.fs-2{background:rgba(59,130,246,.1);color:#60a5fa;border:1px solid rgba(59,130,246,.2)}
+.fs-3{background:rgba(16,185,129,.1);color:#34d399;border:1px solid rgba(16,185,129,.2)}
+.fs-4{background:rgba(245,158,11,.1);color:#fbbf24;border:1px solid rgba(245,158,11,.2)}
+.fs-5{background:rgba(255,255,255,.05);color:rgba(255,255,255,.6);border:1px solid rgba(255,255,255,.1)}
+
+/* Partners */
+.partners-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:16px;margin-top:48px}
+.partner-card{padding:24px 16px;border-radius:16px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);text-align:center;transition:all .3s}
+.partner-card:hover{border-color:rgba(99,102,241,.2);background:rgba(255,255,255,.04)}
+.partner-card .name{font-size:14px;font-weight:700;color:white;margin-bottom:4px}
+.partner-card .role{font-size:11px;color:#6b7280}
+
+/* Contract */
+.contract-box{margin-top:48px;padding:32px;border-radius:20px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06)}
+.contract-box .label{font-size:12px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
+.contract-box .address{font-size:14px;font-family:'SF Mono','Fira Code',monospace;color:#60a5fa;word-break:break-all}
+.contract-box .network{font-size:13px;color:#9ca3af;margin-top:8px}
+.contract-box a{color:#818cf8;text-decoration:none;font-size:13px;font-weight:600}
+.contract-box a:hover{text-decoration:underline}
+
+/* CTA */
+.cta-section{text-align:center}
+.cta-box{max-width:700px;margin:0 auto;padding:64px 40px;border-radius:24px;background:linear-gradient(135deg,rgba(99,102,241,.08),rgba(59,130,246,.08));border:1px solid rgba(99,102,241,.15);position:relative;overflow:hidden}
+.cta-box::before{content:'';position:absolute;top:-100px;right:-100px;width:300px;height:300px;background:radial-gradient(circle,rgba(99,102,241,.1),transparent 70%);border-radius:50%}
+.cta-box h2{font-size:2.5rem;font-weight:900;letter-spacing:-1px;margin-bottom:16px;color:white;position:relative}
+.cta-box p{color:#9ca3af;margin-bottom:32px;font-size:16px;position:relative}
+
+/* Footer */
+footer{border-top:1px solid rgba(255,255,255,.05);padding:40px 2rem}
+.footer-inner{max-width:1200px;margin:0 auto;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:20px}
+.footer-left{display:flex;align-items:center;gap:8px}
+.footer-links{display:flex;gap:24px}
+.footer-links a{color:#6b7280;text-decoration:none;font-size:13px;transition:color .2s}
+.footer-links a:hover{color:white}
+.footer-copy{color:#4b5563;font-size:12px}
+
+/* Responsive */
+@media(max-width:768px){
+  .nav-links{display:none}
+  .hero h1{font-size:2.2rem}
+  .hero-stats{gap:24px}
+  .flow-steps{flex-direction:column}
+  .flow-arrow{transform:rotate(90deg)}
+  .footer-inner{flex-direction:column;text-align:center}
+}
+</style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav>
+  <div class="nav-inner">
+    <a href="/" class="logo">
+      <div class="logo-icon">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M2 12L5 7L8 9L11 4L14 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <span class="logo-text">STOCKPILOT</span>
+      <span class="logo-badge">AI</span>
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#how-it-works">How It Works</a>
+      <a href="#partners">Partners</a>
+      <a href="https://github.com/kirst-dk/stockpilot-ai" target="_blank">GitHub</a>
+      <a href="https://app.stockpilotai.xyz" class="btn-launch">Launch App</a>
+    </div>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-bg">
+    <div class="hero-grid"></div>
+  </div>
+  <div class="hero-content">
+    <div class="hero-badge">
+      <span class="dot"></span>
+      Live on Mantle Network
+    </div>
+    <h1>AI-Powered Portfolio Manager for <span class="gradient">Tokenized Equities</span></h1>
+    <p>Bridge from any chain, build your xStocks portfolio, get AI analysis, and execute trades — all on Mantle Network with full on-chain transparency.</p>
+    <div class="hero-cta">
+      <a href="https://app.stockpilotai.xyz" class="btn-primary">
+        Launch App
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </a>
+      <a href="https://dorahacks.io/buidl/43884" target="_blank" class="btn-secondary">View on DoraHacks</a>
+    </div>
+    <div class="hero-stats">
+      <div class="stat">
+        <div class="stat-value">100+</div>
+        <div class="stat-label">EVM Chains Supported</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">6</div>
+        <div class="stat-label">xStocks Available</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">3</div>
+        <div class="stat-label">AI Engines</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">8</div>
+        <div class="stat-label">Partner Integrations</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section id="features">
+  <div class="section-inner">
+    <div class="section-label">Features</div>
+    <h2 class="section-title">Everything You Need to Invest in Tokenized Stocks</h2>
+    <p class="section-desc">From cross-chain bridging to AI-powered analysis — StockPilot AI handles the complexity so you can focus on building wealth.</p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon fi-purple">🌉</div>
+        <h3>Cross-Chain Bridge</h3>
+        <p>Bridge assets from any EVM chain to Mantle in one click. Any token on any chain → USDC on Mantle, ready to invest.</p>
+        <span class="feature-tag ft-purple">Squid Router</span>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon fi-blue">📊</div>
+        <h3>Portfolio Builder</h3>
+        <p>Select from 6 tokenized equities. Set custom allocations or let AI choose the optimal strategy for your risk profile.</p>
+        <span class="feature-tag ft-blue">xStocks + Fluxion</span>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon fi-green">🤖</div>
+        <h3>AI Portfolio Analysis</h3>
+        <p>Get real-time risk scores, expected returns, and diversification ratings. AI evaluates your picks with on-chain data.</p>
+        <span class="feature-tag ft-green">ELFA + Nansen + AltLLM</span>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon fi-amber">💰</div>
+        <h3>One-Click Purchase</h3>
+        <p>Buy your entire portfolio or individual xStocks with one click. Auto-swap any input token to USDC before purchase.</p>
+        <span class="feature-tag ft-amber">USDC · USDT · WETH · MNT</span>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon fi-pink">💬</div>
+        <h3>AI Chat Assistant</h3>
+        <p>Ask questions about strategies, risk analysis, or market conditions. Powered by ELFA AI + AltLLM with real market data.</p>
+        <span class="feature-tag ft-pink">ELFA AI + AltLLM</span>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon fi-indigo">🔗</div>
+        <h3>On-Chain Transparency</h3>
+        <p>Every trade is recorded on Mantle. Smart contract verified on Mantlescan. Full auditability and trustless execution.</p>
+        <span class="feature-tag ft-indigo">Mantle Network</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- How It Works -->
+<section id="how-it-works" class="flow-section">
+  <div class="section-inner" style="text-align:center">
+    <div class="section-label">How It Works</div>
+    <h2 class="section-title">Bridge → Build → Analyze → Buy</h2>
+    <p class="section-desc" style="margin:0 auto">From any EVM chain to a diversified xStocks portfolio in minutes.</p>
+    <div class="flow-steps">
+      <div class="flow-step fs-5">Any EVM Wallet</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-step fs-1">Squid Bridge</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-step fs-2">Portfolio Builder</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-step fs-3">AI Analysis</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-step fs-4">Buy xStocks</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-step fs-5">Tokens in Wallet</div>
+    </div>
+  </div>
+</section>
+
+<!-- Supported Assets -->
+<section>
+  <div class="section-inner" style="text-align:center">
+    <div class="section-label">Tokenized Equities</div>
+    <h2 class="section-title">Trade World-Class Stocks On-Chain</h2>
+    <p class="section-desc" style="margin:0 auto 48px">Access tokenized versions of the world's most popular equities — trade 24/7, fractional amounts, fully on-chain.</p>
+    <div style="display:flex;justify-content:center;gap:16px;flex-wrap:wrap">
+      <div style="padding:20px 32px;border-radius:16px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);text-align:center">
+        <div style="font-size:20px;font-weight:800;color:white">SPYx</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:4px">S&P 500 ETF</div>
+      </div>
+      <div style="padding:20px 32px;border-radius:16px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);text-align:center">
+        <div style="font-size:20px;font-weight:800;color:white">NVDAx</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:4px">NVIDIA</div>
+      </div>
+      <div style="padding:20px 32px;border-radius:16px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);text-align:center">
+        <div style="font-size:20px;font-weight:800;color:white">AAPLx</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:4px">Apple</div>
+      </div>
+      <div style="padding:20px 32px;border-radius:16px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);text-align:center">
+        <div style="font-size:20px;font-weight:800;color:white">TSLAx</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:4px">Tesla</div>
+      </div>
+      <div style="padding:20px 32px;border-radius:16px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);text-align:center">
+        <div style="font-size:20px;font-weight:800;color:white">MSFTx</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:4px">Microsoft</div>
+      </div>
+      <div style="padding:20px 32px;border-radius:16px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);text-align:center">
+        <div style="font-size:20px;font-weight:800;color:white">AMZNx</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:4px">Amazon</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Partners -->
+<section id="partners" style="background:rgba(255,255,255,.01);border-top:1px solid rgba(255,255,255,.04)">
+  <div class="section-inner" style="text-align:center">
+    <div class="section-label">Ecosystem Partners</div>
+    <h2 class="section-title">Powered by the Best in Web3</h2>
+    <p class="section-desc" style="margin:0 auto">Built with leading protocols and AI platforms in the Mantle ecosystem.</p>
+    <div class="partners-grid">
+      <div class="partner-card">
+        <div class="name">Mantle Network</div>
+        <div class="role">L2 Blockchain</div>
+      </div>
+      <div class="partner-card">
+        <div class="name">Squid Router</div>
+        <div class="role">Cross-Chain Bridge</div>
+      </div>
+      <div class="partner-card">
+        <div class="name">Nansen</div>
+        <div class="role">On-Chain Analytics</div>
+      </div>
+      <div class="partner-card">
+        <div class="name">ELFA AI</div>
+        <div class="role">Market Intelligence</div>
+      </div>
+      <div class="partner-card">
+        <div class="name">AltLLM</div>
+        <div class="role">AI Inference</div>
+      </div>
+      <div class="partner-card">
+        <div class="name">xStocks</div>
+        <div class="role">Tokenized Equities</div>
+      </div>
+      <div class="partner-card">
+        <div class="name">Fluxion Network</div>
+        <div class="role">DEX on Mantle</div>
+      </div>
+      <div class="partner-card">
+        <div class="name">RainbowKit</div>
+        <div class="role">Wallet Connection</div>
+      </div>
+    </div>
+
+    <!-- Contract -->
+    <div class="contract-box">
+      <div class="label">Verified Smart Contract</div>
+      <div class="address">0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9</div>
+      <div class="network">Mantle Mainnet · ChainID 5000</div>
+      <div style="margin-top:12px">
+        <a href="https://mantlescan.xyz/address/0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9#code" target="_blank">View on Mantlescan →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <div class="section-inner">
+    <div class="cta-box">
+      <h2>Ready to Invest?</h2>
+      <p>Connect your wallet, bridge assets to Mantle, and start building your AI-powered xStocks portfolio.</p>
+      <a href="https://app.stockpilotai.xyz" class="btn-primary">
+        Launch App
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-left">
+      <a href="/" class="logo" style="text-decoration:none">
+        <div class="logo-icon" style="width:28px;height:28px">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 12L5 7L8 9L11 4L14 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <span class="logo-text" style="font-size:15px">STOCKPILOT</span>
+        <span class="logo-badge">AI</span>
+      </a>
+    </div>
+    <div class="footer-links">
+      <a href="https://app.stockpilotai.xyz">App</a>
+      <a href="https://github.com/kirst-dk/stockpilot-ai" target="_blank">GitHub</a>
+      <a href="https://dorahacks.io/buidl/43884" target="_blank">DoraHacks</a>
+      <a href="https://x.com/stepanchenko221" target="_blank">Twitter</a>
+      <a href="https://mantlescan.xyz/address/0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9" target="_blank">Contract</a>
+    </div>
+    <div class="footer-copy">© 2026 StockPilot AI. Built on Mantle Network.</div>
+  </div>
+</footer>
+
+</body>
+</html>
