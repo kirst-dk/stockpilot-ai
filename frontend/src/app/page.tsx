@@ -1133,6 +1133,21 @@ function PoolsTab() {
 
 /* ========== BRIDGE TAB ========== */
 function BridgeTab() {
+  const [bridgeFrom, setBridgeFrom] = useState("Ethereum");
+  const BRIDGE_CHAINS = [
+    { name: "Ethereum", short: "ETH", color: "blue", chainId: 1 },
+    { name: "Arbitrum", short: "ARB", color: "blue", chainId: 42161 },
+    { name: "Optimism", short: "OP", color: "red", chainId: 10 },
+    { name: "Base", short: "BASE", color: "blue", chainId: 8453 },
+    { name: "Polygon", short: "MATIC", color: "purple", chainId: 137 },
+    { name: "BNB Chain", short: "BSC", color: "yellow", chainId: 56 },
+    { name: "Avalanche", short: "AVAX", color: "red", chainId: 43114 },
+    { name: "zkSync", short: "ZK", color: "purple", chainId: 324 },
+  ];
+
+  const selectedChain = BRIDGE_CHAINS.find(c => c.name === bridgeFrom);
+  const relayUrl = `https://www.relay.link/bridge/mantle${selectedChain ? `?fromChainId=${selectedChain.chainId}` : ""}`;
+
   return (
     <div className="max-w-2xl mx-auto">
       <div className="text-center mb-6">
@@ -1140,58 +1155,120 @@ function BridgeTab() {
         <p className="text-xs text-white/40">Cross-chain transfers powered by Relay</p>
       </div>
 
-      {/* Relay Bridge embed */}
+      {/* Bridge interface */}
       <div className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden">
-        <iframe
-          src="https://www.relay.link/bridge?toChainId=5000&lockToChain=true&header=false"
-          width="100%"
-          height="520"
-          style={{ border: "none", borderRadius: "16px" }}
-          allow="clipboard-write"
-          title="Relay Bridge"
-        />
+        <div className="p-6">
+          {/* From chain */}
+          <div className="mb-4">
+            <div className="text-[10px] text-white/40 mb-2 uppercase tracking-wider">From Network</div>
+            <div className="grid grid-cols-4 gap-2">
+              {BRIDGE_CHAINS.map(chain => (
+                <button
+                  key={chain.name}
+                  onClick={() => setBridgeFrom(chain.name)}
+                  className={`p-2.5 rounded-xl text-center transition-all duration-200 border ${
+                    bridgeFrom === chain.name
+                      ? "border-blue-500/40 bg-blue-500/[0.08]"
+                      : "border-white/5 bg-white/[0.02] hover:border-white/10 hover:bg-white/[0.04]"
+                  }`}
+                >
+                  <div className="text-xs font-semibold text-white/80">{chain.short}</div>
+                  <div className="text-[8px] text-white/30 mt-0.5">{chain.name}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Arrow */}
+          <div className="flex justify-center my-3">
+            <div className="w-8 h-8 rounded-lg bg-[#0d1220] border border-white/10 flex items-center justify-center text-white/50">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M5 10l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </div>
+          </div>
+
+          {/* To chain (fixed Mantle) */}
+          <div className="mb-5">
+            <div className="text-[10px] text-white/40 mb-2 uppercase tracking-wider">To Network</div>
+            <div className="p-3 rounded-xl border border-cyan-500/30 bg-cyan-500/[0.06] flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center text-cyan-400 font-bold text-xs">M</div>
+              <div>
+                <div className="text-sm font-semibold text-white/90">Mantle</div>
+                <div className="text-[10px] text-white/40">ChainID 5000</div>
+              </div>
+              <div className="ml-auto text-[9px] text-cyan-400/60 bg-cyan-500/10 px-2 py-0.5 rounded-full border border-cyan-500/20">Destination</div>
+            </div>
+          </div>
+
+          {/* Supported tokens */}
+          <div className="mb-5 p-3 rounded-lg bg-white/[0.02] border border-white/5">
+            <div className="text-[10px] text-white/40 mb-2">Supported tokens</div>
+            <div className="flex flex-wrap gap-1.5">
+              {["ETH", "USDC", "USDT", "WETH", "DAI", "WBTC"].map(token => (
+                <span key={token} className="text-[9px] font-medium px-2 py-1 rounded-lg bg-white/5 text-white/60 border border-white/5">{token}</span>
+              ))}
+              <span className="text-[9px] text-white/30 px-2 py-1">+ many more</span>
+            </div>
+          </div>
+
+          {/* Stats */}
+          <div className="grid grid-cols-3 gap-3 mb-5">
+            <div className="text-center p-2 rounded-lg bg-white/[0.02] border border-white/5">
+              <div className="text-sm font-bold text-white/90">&lt;5s</div>
+              <div className="text-[9px] text-white/40">Speed</div>
+            </div>
+            <div className="text-center p-2 rounded-lg bg-white/[0.02] border border-white/5">
+              <div className="text-sm font-bold text-white/90">85+</div>
+              <div className="text-[9px] text-white/40">Networks</div>
+            </div>
+            <div className="text-center p-2 rounded-lg bg-white/[0.02] border border-white/5">
+              <div className="text-sm font-bold text-white/90">$5B+</div>
+              <div className="text-[9px] text-white/40">Volume</div>
+            </div>
+          </div>
+
+          {/* CTA */}
+          <a
+            href={relayUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="w-full py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold text-sm text-center hover:shadow-lg hover:shadow-blue-500/20 transition-all flex items-center justify-center gap-2"
+          >
+            Bridge to Mantle via Relay
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 12L12 4M12 4H6M12 4v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </a>
+
+          <div className="mt-3 flex items-center justify-center gap-3 text-[10px] text-white/30">
+            <span>Powered by Relay.link</span>
+            <span>·</span>
+            <a href="https://docs.relay.link/what-is-relay" target="_blank" rel="noreferrer" className="text-blue-400/60 hover:text-blue-400 transition-colors">Docs</a>
+          </div>
+        </div>
       </div>
 
-      {/* Bridge info */}
-      <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="p-4 rounded-xl border border-white/5 bg-white/[0.015]">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-7 h-7 rounded-lg bg-blue-500/10 flex items-center justify-center">
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 8h12M10 4l4 4-4 4" stroke="#3b82f6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            </div>
-            <span className="text-xs font-semibold text-white/70">Relay Bridge</span>
+      {/* xStocks CCIP Bridge */}
+      <div className="mt-6 p-4 rounded-xl border border-white/5 bg-white/[0.015]">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 8h12M10 4l4 4-4 4" stroke="#10b981" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </div>
-          <p className="text-[10px] text-white/40 leading-relaxed mb-3">Fastest cross-chain bridge supporting 85+ networks. Bridge any token to Mantle in seconds.</p>
-          <div className="space-y-1.5 text-[10px]">
-            <div className="flex justify-between"><span className="text-white/40">Speed</span><span className="text-white/60">&lt; 5 seconds</span></div>
-            <div className="flex justify-between"><span className="text-white/40">Networks</span><span className="text-white/60">85+ EVM chains</span></div>
-            <div className="flex justify-between"><span className="text-white/40">Volume</span><span className="text-white/60">$5B+ processed</span></div>
-          </div>
-          <a href="https://docs.relay.link/what-is-relay" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-400 hover:text-blue-300 transition-colors mt-3">
-            Relay Docs <svg width="8" height="8" viewBox="0 0 16 16" fill="none"><path d="M4 12L12 4M12 4H6M12 4v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </a>
-        </div>
-
-        <div className="p-4 rounded-xl border border-white/5 bg-white/[0.015]">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 8h12M10 4l4 4-4 4" stroke="#10b981" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            </div>
+          <div>
             <span className="text-xs font-semibold text-white/70">xStocks Bridge (CCIP)</span>
+            <span className="text-[9px] text-white/30 ml-2">Chainlink Cross-Chain</span>
           </div>
-          <p className="text-[10px] text-white/40 leading-relaxed mb-3">Bridge xStock tokens between networks via Chainlink CCIP. {BRIDGE_PRODUCTS.size} assets supported.</p>
-          <div className="flex flex-wrap gap-1 mb-3">
-            {BRIDGE_DESTINATIONS.map(net => (
-              <span key={net} className={`text-[8px] font-medium px-1.5 py-0.5 rounded border ${NETWORK_COLORS[net] || "bg-white/5 text-white/40 border-white/10"}`}>
-                {NETWORK_SHORT[net] || net}
-              </span>
-            ))}
-          </div>
-          <a href={XSTOCKS_BRIDGE_URL} target="_blank" rel="noreferrer"
-            className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 transition-colors">
-            xStocks Bridge <svg width="8" height="8" viewBox="0 0 16 16" fill="none"><path d="M4 12L12 4M12 4H6M12 4v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </a>
         </div>
+        <p className="text-[10px] text-white/40 leading-relaxed mb-3">Bridge xStock tokens between networks via Chainlink CCIP. {BRIDGE_PRODUCTS.size} bridgeable assets across {BRIDGE_DESTINATIONS.length} networks.</p>
+        <div className="flex flex-wrap gap-1 mb-3">
+          {BRIDGE_DESTINATIONS.map(net => (
+            <span key={net} className={`text-[8px] font-medium px-1.5 py-0.5 rounded border ${NETWORK_COLORS[net] || "bg-white/5 text-white/40 border-white/10"}`}>
+              {NETWORK_SHORT[net] || net}
+            </span>
+          ))}
+        </div>
+        <a href={XSTOCKS_BRIDGE_URL} target="_blank" rel="noreferrer"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/20 text-[10px] font-semibold hover:bg-emerald-600/30 transition-all">
+          Open xStocks Bridge
+          <svg width="8" height="8" viewBox="0 0 16 16" fill="none"><path d="M4 12L12 4M12 4H6M12 4v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </a>
       </div>
     </div>
   );
