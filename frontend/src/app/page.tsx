@@ -20,7 +20,7 @@ const ALTLLM_API_KEY = process.env.NEXT_PUBLIC_ALTLLM_API_KEY || "";
 const SQUID_INTEGRATOR_ID = "stockpilot-ai-83f92aed-1e4a-411f-b5fe-809e52b8158f";
 const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"];
 
-const XSTOCKS = [
+const XSTOCKS_FALLBACK = [
   { symbol: "SPYx", name: "S&P 500 ETF", price: 587.42, change: +1.2, sector: "Index" },
   { symbol: "NVDAx", name: "NVIDIA", price: 131.88, change: +3.4, sector: "AI / Chips" },
   { symbol: "AAPLx", name: "Apple", price: 198.55, change: -0.3, sector: "Tech" },
@@ -28,6 +28,35 @@ const XSTOCKS = [
   { symbol: "MSFTx", name: "Microsoft", price: 442.31, change: +0.8, sector: "Cloud / AI" },
   { symbol: "AMZNx", name: "Amazon", price: 193.67, change: +1.5, sector: "E-comm / Cloud" },
 ];
+
+const BRIDGE_PRODUCTS = new Set(["METAx", "MSTRx", "HDx", "NVDAx", "GOOGLx", "BTBTx", "QQQx", "TSLAx", "SPYx", "CRCLx", "AAPLx", "COINx"]);
+const BRIDGE_DESTINATIONS = ["Ethereum", "BinanceSmartChain", "Arbitrum", "Ink"];
+const XSTOCKS_BRIDGE_URL = "https://defi.xstocks.fi/bridge";
+const FLUXION_TRADE_URL = "https://app.fluxion.network/trade";
+
+const NETWORK_COLORS: Record<string, string> = {
+  Ethereum: "bg-blue-500/20 text-blue-300 border-blue-500/30",
+  Solana: "bg-purple-500/20 text-purple-300 border-purple-500/30",
+  Mantle: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30",
+  Ton: "bg-sky-500/20 text-sky-300 border-sky-500/30",
+  Ink: "bg-pink-500/20 text-pink-300 border-pink-500/30",
+  BinanceSmartChain: "bg-yellow-500/20 text-yellow-300 border-yellow-500/30",
+  Arbitrum: "bg-blue-400/20 text-blue-200 border-blue-400/30",
+  HyperEVM: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
+  Tron: "bg-red-500/20 text-red-300 border-red-500/30",
+};
+
+const NETWORK_SHORT: Record<string, string> = {
+  Ethereum: "ETH",
+  Solana: "SOL",
+  Mantle: "MNT",
+  Ton: "TON",
+  Ink: "INK",
+  BinanceSmartChain: "BSC",
+  Arbitrum: "ARB",
+  HyperEVM: "HYPER",
+  Tron: "TRON",
+};
 
 const STRATEGIES = [
   {
@@ -107,6 +136,14 @@ const TICKER_DATA = [
   { symbol: "AMZNx", price: "193.67", change: "+1.5%" },
 ];
 
+interface XStockAsset {
+  symbol: string;
+  name: string;
+  logo: string;
+  mantleAddress: string;
+  networks: string[];
+}
+
 interface NansenToken {
   chain: string;
   token_symbol: string;
@@ -179,6 +216,10 @@ export default function Home() {
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [bridgeOpen, setBridgeOpen] = useState(false);
+  const [allXStocks, setAllXStocks] = useState<XStockAsset[]>([]);
+  const [xStocksLoading, setXStocksLoading] = useState(true);
+  const [xStocksFilter, setXStocksFilter] = useState("");
+  const [xStocksCategory, setXStocksCategory] = useState<"all" | "bridgeable" | "popular">("all");
   const [portfolioSelected, setPortfolioSelected] = useState<Record<string, number>>({});
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
@@ -231,8 +272,8 @@ export default function Home() {
     if (selectedCount === 0) return;
     setAiAnalyzing(true);
     const positions = Object.entries(portfolioSelected).map(([sym, pct]) => {
-      const stock = XSTOCKS.find(x => x.symbol === sym);
-      return `${sym} (${stock?.name}): ${pct}% — $${stock?.price} (${(stock?.change ?? 0) >= 0 ? "+" : ""}${stock?.change}%)`;
+      const stock = allXStocks.find(x => x.symbol === sym) || XSTOCKS_FALLBACK.find(x => x.symbol === sym);
+      return `${sym} (${stock?.name || sym}): ${pct}%`;
     }).join("\n");
 
     const prompt = `Analyze this xStocks portfolio on Mantle Network. Give: 1) Risk Score (1-10), 2) Expected Monthly Return, 3) Diversification Rating, 4) Key Risks, 5) Specific Recommendations. Be concise, use bullet points.\n\nPortfolio (total ${totalAllocation}%):\n${positions}`;
@@ -267,7 +308,7 @@ export default function Home() {
     const hasNvda = portfolioSelected["NVDAx"];
     const hasSpy = portfolioSelected["SPYx"];
     const risk = selectedCount <= 2 ? "7/10 — Concentrated" : selectedCount <= 4 ? "5/10 — Moderate" : "3/10 — Well Diversified";
-    return `Portfolio Analysis (AI-Powered)\n\nRisk Score: ${risk}\nEst. Monthly Return: +${(1.2 + selectedCount * 0.3).toFixed(1)}%\nDiversification: ${selectedCount}/6 sectors covered\n\nKey Risks:\n${selectedCount <= 2 ? "- High concentration risk — consider adding more assets" : "- Market correlation during downturns"}\n${hasNvda && (portfolioSelected["NVDAx"] || 0) > 30 ? "- Heavy AI sector exposure (NVDAx >30%)" : "- Sector allocation looks balanced"}\n\nRecommendations:\n${!hasSpy ? "- Consider adding SPYx for broad market exposure" : "- SPYx provides good base stability"}\n${!hasNvda ? "- NVDAx has strong momentum (+3.4%) — consider adding" : "- NVDAx momentum is strong, good pick"}\n- Smart money (Nansen) shows institutional accumulation in tech\n- ELFA sentiment: 82% bullish on AI sector tokens`;
+    return `Portfolio Analysis (AI-Powered)\n\nRisk Score: ${risk}\nEst. Monthly Return: +${(1.2 + selectedCount * 0.3).toFixed(1)}%\nDiversification: ${selectedCount} assets selected\n\nKey Risks:\n${selectedCount <= 2 ? "- High concentration risk — consider adding more assets" : "- Market correlation during downturns"}\n${hasNvda && (portfolioSelected["NVDAx"] || 0) > 30 ? "- Heavy AI sector exposure (NVDAx >30%)" : "- Sector allocation looks balanced"}\n\nRecommendations:\n${!hasSpy ? "- Consider adding SPYx for broad market exposure" : "- SPYx provides good base stability"}\n${!hasNvda ? "- NVDAx has strong momentum — consider adding" : "- NVDAx momentum is strong, good pick"}\n- Smart money (Nansen) shows institutional accumulation in tech\n- ELFA sentiment: 82% bullish on AI sector tokens`;
   };
 
   const { address, isConnected } = useAccount();
@@ -290,6 +331,44 @@ export default function Home() {
     }
     prevConnected.current = isConnected;
   }, [isConnected]);
+
+  // Fetch ALL xStocks from API
+  useEffect(() => {
+    async function fetchXStocks() {
+      try {
+        const res = await fetch("https://api.xstocks.fi/api/v2/public/assets");
+        const data = await res.json();
+        const assets = data.nodes || data;
+        const mantleAssets: XStockAsset[] = [];
+        for (const a of assets) {
+          const mantle = (a.deployments || []).find((d: { network: string }) => d.network === "Mantle");
+          if (mantle) {
+            mantleAssets.push({
+              symbol: a.symbol,
+              name: a.name || a.description || a.symbol,
+              logo: a.logo || "",
+              mantleAddress: mantle.address,
+              networks: (a.deployments || []).map((d: { network: string }) => d.network),
+            });
+          }
+        }
+        mantleAssets.sort((a, b) => a.symbol.localeCompare(b.symbol));
+        setAllXStocks(mantleAssets);
+      } catch {
+        setAllXStocks([]);
+      }
+      setXStocksLoading(false);
+    }
+    fetchXStocks();
+  }, []);
+
+  const filteredXStocks = allXStocks.filter(s => {
+    const matchSearch = !xStocksFilter || s.symbol.toLowerCase().includes(xStocksFilter.toLowerCase()) || s.name.toLowerCase().includes(xStocksFilter.toLowerCase());
+    if (!matchSearch) return false;
+    if (xStocksCategory === "bridgeable") return BRIDGE_PRODUCTS.has(s.symbol);
+    if (xStocksCategory === "popular") return ["SPYx", "NVDAx", "AAPLx", "TSLAx", "MSFTx", "AMZNx", "GOOGLx", "METAx", "QQQx", "COINx", "MSTRx", "TSMx"].includes(s.symbol);
+    return true;
+  });
 
   // Fetch Nansen smart money data
   useEffect(() => {
@@ -363,9 +442,10 @@ export default function Home() {
       try {
         const systemPrompt = `You are StockPilot AI, an autonomous AI agent for trading tokenized equities (xStocks) on Mantle blockchain. You help users with portfolio strategy, risk assessment, and market analysis.
 
-Available xStocks: SPYx ($587.42), NVDAx ($131.88), AAPLx ($198.55), TSLAx ($178.22), MSFTx ($442.31), AMZNx ($193.67).
+Available xStocks: ${allXStocks.length} assets on Mantle including SPYx, NVDAx, AAPLx, TSLAx, MSFTx, AMZNx, GOOGLx, METAx, QQQx, COINx, TSMx, AMDx, and many more.
 Strategies: Balanced Growth (risk 5/10), Momentum Trading (risk 6/10), Value Investing (risk 4/10).
 Powered by: Nansen (on-chain analytics), ELFA (market sentiment), AltLLM (AI inference).
+Buy on: Fluxion DEX (https://app.fluxion.network/trade). Bridge: Chainlink CCIP via xStocks bridge.
 Network: Mantle Mainnet (ChainID 5000). Contract: ${CONTRACT}.
 
 Be concise, data-driven, and actionable. Use bullet points. Max 150 words.`;
@@ -515,7 +595,7 @@ Be concise, data-driven, and actionable. Use bullet points. Max 150 words.`;
         {/* Stats */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4, duration: 0.6 }} className="mt-16 grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { label: "ASSETS MANAGED", value: "$100K+", sub: "across 6 xStocks" },
+            { label: "ASSETS MANAGED", value: "$100K+", sub: `across ${allXStocks.length || 92} xStocks` },
             { label: "AI SIGNALS", value: "24/7", sub: "ELFA + AltLLM powered" },
             { label: "ON-CHAIN TRADES", value: "47", sub: "fully transparent" },
             { label: "STRATEGIES", value: "3", sub: "risk profiles" },
@@ -589,7 +669,7 @@ Be concise, data-driven, and actionable. Use bullet points. Max 150 words.`;
                   <span className="text-white/60"><span className="text-white/80 font-medium">Dividends</span> — auto-rebase reflects stock splits &amp; dividends</span>
                 </div>
               </div>
-              <div className="text-xs text-white/30 mb-4">Available: SPYx, NVDAx, AAPLx, TSLAx, MSFTx, AMZNx</div>
+              <div className="text-xs text-white/30 mb-4">Available: {allXStocks.length || 92} xStocks on Mantle — ETFs, tech, energy, mining &amp; more</div>
               <a href="https://xstocks.fi" target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-semibold text-blue-400 hover:text-blue-300 transition-colors">
                 Learn more at xstocks.fi
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 12L12 4M12 4H6M12 4v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -1230,7 +1310,6 @@ Be concise, data-driven, and actionable. Use bullet points. Max 150 words.`;
                   <div className="text-[10px] text-white/40 tracking-wider mb-2">ALLOCATION BREAKDOWN</div>
                   <div className="space-y-1.5">
                     {Object.entries(portfolioSelected).map(([sym, pct]) => {
-                      const stock = XSTOCKS.find(x => x.symbol === sym);
                       const amt = buyAmount ? (parseFloat(buyAmount) * pct / 100).toFixed(2) : "0.00";
                       return (
                         <div key={sym} className="flex items-center justify-between text-sm">
@@ -1238,7 +1317,7 @@ Be concise, data-driven, and actionable. Use bullet points. Max 150 words.`;
                           <div className="flex items-center gap-3">
                             <span className="text-white/40 text-xs">{pct}%</span>
                             <span className="font-mono text-white/60">{amt} {inputToken}</span>
-                            <span className="text-[10px] text-white/30">{"\u2248"}${stock ? (parseFloat(amt) * (inputToken === "USDC" || inputToken === "USDT" ? 1 : inputToken === "WETH" ? 3845 : 0.82)).toFixed(0) : "0"}</span>
+                            <span className="text-[10px] text-white/30">{"\u2248"}${(parseFloat(amt || "0") * (inputToken === "USDC" || inputToken === "USDT" ? 1 : inputToken === "WETH" ? 3845 : 0.82)).toFixed(0)}</span>
                           </div>
                         </div>
                       );
@@ -1274,13 +1353,183 @@ Be concise, data-driven, and actionable. Use bullet points. Max 150 words.`;
         )}
       </AnimatePresence>
 
+      {/* xStocks Market — ALL available stocks */}
+      <section className="max-w-7xl mx-auto px-6 py-24 border-t border-white/5">
+        <FadeIn>
+          <div className="text-center mb-12">
+            <span className="text-[11px] font-semibold text-white/40 tracking-[0.2em] uppercase">xSTOCKS MARKET</span>
+            <h2 className="text-3xl md:text-4xl font-bold mt-3 tracking-tight">
+              {xStocksLoading ? "Loading..." : `${allXStocks.length} Tokenized Equities`}
+            </h2>
+            <p className="text-white/40 mt-3 max-w-2xl mx-auto">All xStocks available on Mantle. Buy on Fluxion DEX, bridge to other networks via Chainlink CCIP.</p>
+          </div>
+        </FadeIn>
+
+        {/* Search + Filter */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-8">
+          <div className="relative flex-1">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30"><circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.5"/><path d="M11 11l3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+            <input
+              type="text"
+              value={xStocksFilter}
+              onChange={(e) => setXStocksFilter(e.target.value)}
+              placeholder="Search by symbol or name..."
+              className="w-full bg-white/[0.04] border border-white/10 rounded-xl pl-9 pr-4 py-3 text-sm text-white/90 placeholder:text-white/30 focus:outline-none focus:border-blue-500/50"
+            />
+          </div>
+          <div className="flex gap-2">
+            {([["all", "All"], ["popular", "Popular"], ["bridgeable", "Bridgeable"]] as const).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setXStocksCategory(key)}
+                className={`px-4 py-3 rounded-xl text-sm font-medium transition-all ${
+                  xStocksCategory === key
+                    ? "bg-blue-600/20 text-blue-400 border border-blue-500/30"
+                    : "bg-white/5 text-white/50 border border-white/5 hover:bg-white/10"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Stats bar */}
+        <div className="flex items-center gap-4 mb-6 text-xs text-white/40">
+          <span>Showing {filteredXStocks.length} of {allXStocks.length} assets</span>
+          <span>•</span>
+          <span>{BRIDGE_PRODUCTS.size} bridgeable via CCIP</span>
+          <span>•</span>
+          <span>Networks: {BRIDGE_DESTINATIONS.length + 1} chains</span>
+        </div>
+
+        {/* xStocks grid */}
+        {xStocksLoading ? (
+          <div className="flex items-center justify-center py-20">
+            <span className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            <span className="ml-3 text-white/40">Loading xStocks from API...</span>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+            {filteredXStocks.map((stock) => {
+              const isBridgeable = BRIDGE_PRODUCTS.has(stock.symbol);
+              return (
+                <div key={stock.symbol} className="p-5 rounded-2xl border border-white/5 bg-white/[0.01] hover:border-white/15 hover:bg-white/[0.03] transition-all duration-300">
+                  {/* Header */}
+                  <div className="flex items-center gap-3 mb-3">
+                    {stock.logo ? (
+                      <img src={stock.logo} alt={stock.symbol} className="w-10 h-10 rounded-xl bg-white/5 object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                    ) : (
+                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500/20 to-indigo-500/20 flex items-center justify-center text-xs font-bold text-blue-400">{stock.symbol.slice(0, 2)}</div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-base font-bold text-white/90 truncate">{stock.symbol}</div>
+                      <div className="text-xs text-white/40 truncate">{stock.name}</div>
+                    </div>
+                    {isBridgeable && (
+                      <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 whitespace-nowrap">BRIDGE</span>
+                    )}
+                  </div>
+
+                  {/* Networks */}
+                  <div className="flex flex-wrap gap-1 mb-3">
+                    {stock.networks.slice(0, 6).map(net => (
+                      <span key={net} className={`text-[9px] font-medium px-1.5 py-0.5 rounded border ${NETWORK_COLORS[net] || "bg-white/5 text-white/40 border-white/10"}`}>
+                        {NETWORK_SHORT[net] || net}
+                      </span>
+                    ))}
+                    {stock.networks.length > 6 && (
+                      <span className="text-[9px] text-white/30 px-1.5 py-0.5">+{stock.networks.length - 6}</span>
+                    )}
+                  </div>
+
+                  {/* Contract address */}
+                  <div className="flex items-center gap-1 mb-4">
+                    <span className="text-[9px] text-white/20 font-mono truncate">{stock.mantleAddress}</span>
+                    <a href={`https://mantlescan.xyz/address/${stock.mantleAddress}`} target="_blank" rel="noreferrer" className="text-white/20 hover:text-white/50 transition-colors flex-shrink-0">
+                      <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 12L12 4M12 4H6M12 4v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    </a>
+                  </div>
+
+                  {/* Action buttons */}
+                  <div className="flex gap-2">
+                    <a
+                      href={FLUXION_TRADE_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold text-xs text-center hover:shadow-lg hover:shadow-blue-500/20 hover:-translate-y-0.5 transition-all"
+                    >
+                      BUY on Fluxion
+                    </a>
+                    {isBridgeable && (
+                      <a
+                        href={XSTOCKS_BRIDGE_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-3 py-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold text-xs hover:bg-emerald-500/20 transition-all whitespace-nowrap"
+                      >
+                        Bridge
+                      </a>
+                    )}
+                    <button
+                      onClick={() => toggleXStock(stock.symbol)}
+                      className={`px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                        portfolioSelected[stock.symbol] !== undefined
+                          ? "bg-blue-600/20 text-blue-400 border border-blue-500/30"
+                          : "bg-white/5 text-white/50 border border-white/5 hover:bg-white/10"
+                      }`}
+                    >
+                      {portfolioSelected[stock.symbol] !== undefined ? "Added" : "+ Add"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Bridge destinations info */}
+        <FadeIn>
+          <div className="p-6 rounded-2xl border border-emerald-500/10 bg-emerald-500/[0.02]">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center">
+                <svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M2 8h12M8 2v12M4 4l8 8M12 4l-8 8" stroke="#34d399" strokeWidth="1.5" strokeLinecap="round"/></svg>
+              </div>
+              <div>
+                <h3 className="font-bold text-white/90">xStocks Bridge (Chainlink CCIP)</h3>
+                <p className="text-xs text-white/40">{BRIDGE_PRODUCTS.size} assets can be bridged from Mantle to other networks</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              {BRIDGE_DESTINATIONS.map(net => (
+                <div key={net} className="p-3 rounded-xl border border-white/5 bg-white/[0.02] text-center">
+                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded border ${NETWORK_COLORS[net] || "bg-white/5 text-white/40 border-white/10"}`}>
+                    {NETWORK_SHORT[net] || net}
+                  </span>
+                  <div className="text-xs text-white/30 mt-2">{net === "BinanceSmartChain" ? "BSC" : net}</div>
+                </div>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {Array.from(BRIDGE_PRODUCTS).map(sym => (
+                <span key={sym} className="text-[10px] font-medium px-2 py-1 rounded-lg bg-white/[0.03] border border-white/5 text-white/50">{sym}</span>
+              ))}
+            </div>
+            <a href={XSTOCKS_BRIDGE_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-400 hover:text-emerald-300 transition-colors mt-4">
+              Open xStocks Bridge
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 12L12 4M12 4H6M12 4v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </a>
+          </div>
+        </FadeIn>
+      </section>
+
       {/* Portfolio Builder */}
       <section ref={portfolioRef} className="max-w-7xl mx-auto px-6 py-24 border-t border-white/5">
         <FadeIn>
           <div className="text-center mb-12">
             <span className="text-[11px] font-semibold text-white/40 tracking-[0.2em] uppercase">PORTFOLIO BUILDER</span>
             <h2 className="text-3xl md:text-4xl font-bold mt-3 tracking-tight">Build Your Portfolio</h2>
-            <p className="text-white/40 mt-3 max-w-xl mx-auto">Select xStocks, set allocations, get AI analysis, and buy — all in one place.</p>
+            <p className="text-white/40 mt-3 max-w-xl mx-auto">Select xStocks from the market above, set allocations, get AI analysis, and buy.</p>
           </div>
         </FadeIn>
 
@@ -1299,38 +1548,30 @@ Be concise, data-driven, and actionable. Use bullet points. Max 150 words.`;
           )}
         </div>
 
-        {/* xStocks grid */}
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
-          {XSTOCKS.map((stock) => {
-            const isSelected = portfolioSelected[stock.symbol] !== undefined;
-            const alloc = portfolioSelected[stock.symbol] || 0;
-            return (
-              <div key={stock.symbol} className={`relative p-5 rounded-2xl border transition-all duration-300 cursor-pointer ${
-                isSelected
-                  ? "border-blue-500/40 bg-blue-500/[0.05] shadow-lg shadow-blue-500/5"
-                  : "border-white/5 bg-white/[0.01] hover:border-white/15 hover:bg-white/[0.03]"
-              }`} onClick={() => toggleXStock(stock.symbol)}>
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <div className="text-lg font-bold text-white/90">{stock.symbol}</div>
-                    <div className="text-xs text-white/40">{stock.name}</div>
+        {/* Selected xStocks with allocation sliders */}
+        {selectedCount > 0 ? (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
+            {Object.entries(portfolioSelected).map(([sym, alloc]) => {
+              const stock = allXStocks.find(s => s.symbol === sym);
+              return (
+                <div key={sym} className="relative p-5 rounded-2xl border border-blue-500/40 bg-blue-500/[0.05] shadow-lg shadow-blue-500/5 transition-all duration-300">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      {stock?.logo ? (
+                        <img src={stock.logo} alt={sym} className="w-8 h-8 rounded-lg bg-white/5" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                      ) : (
+                        <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center text-xs font-bold text-blue-400">{sym.slice(0, 2)}</div>
+                      )}
+                      <div>
+                        <div className="text-base font-bold text-white/90">{sym}</div>
+                        <div className="text-[10px] text-white/40">{stock?.name || sym}</div>
+                      </div>
+                    </div>
+                    <button onClick={() => toggleXStock(sym)} className="w-6 h-6 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 hover:bg-red-500/20 transition-all">
+                      <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                    </button>
                   </div>
-                  <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${
-                    isSelected ? "bg-blue-600 border-blue-500" : "border-white/20"
-                  }`}>
-                    {isSelected && <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8l3.5 3.5L13 5" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-                  </div>
-                </div>
-                <div className="flex items-end justify-between">
-                  <div className="text-xl font-bold font-mono">${stock.price}</div>
-                  <span className={`text-sm font-semibold ${stock.change >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                    {stock.change >= 0 ? "+" : ""}{stock.change}%
-                  </span>
-                </div>
-                <div className="text-[10px] text-white/30 mt-1">{stock.sector}</div>
-
-                {isSelected && (
-                  <div className="mt-4 pt-4 border-t border-white/5" onClick={(e) => e.stopPropagation()}>
+                  <div className="mt-2" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-xs text-white/50">Allocation</span>
                       <span className="text-xs font-mono text-blue-400">{alloc}%</span>
@@ -1340,15 +1581,19 @@ Be concise, data-driven, and actionable. Use bullet points. Max 150 words.`;
                       min={0}
                       max={100}
                       value={alloc}
-                      onChange={(e) => updateAllocation(stock.symbol, parseInt(e.target.value))}
+                      onChange={(e) => updateAllocation(sym, parseInt(e.target.value))}
                       className="w-full h-1.5 rounded-full appearance-none bg-white/10 accent-blue-500 cursor-pointer"
                     />
                   </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-center py-12 mb-8 border border-dashed border-white/10 rounded-2xl">
+            <p className="text-white/30 text-sm">No assets selected. Click &quot;+ Add&quot; on any xStock above to build your portfolio.</p>
+          </div>
+        )}
 
         {/* Portfolio summary + AI analysis + Buy */}
         {selectedCount > 0 && (
