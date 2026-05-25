@@ -4,7 +4,7 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  transpilePackages: ["@0xsquid/widget", "@0xsquid/react-hooks"],
+  transpilePackages: ["@0xsquid/widget", "@0xsquid/react-hooks", "@reservoir0x/relay-kit-ui", "@reservoir0x/relay-sdk"],
 };
 
 module.exports = nextConfig;
