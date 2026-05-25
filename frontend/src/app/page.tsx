@@ -4,8 +4,14 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useAccount, useBalance } from "wagmi";
+import { useAccount, useBalance, useWalletClient } from "wagmi";
 import { formatEther } from "viem";
+import dynamic from "next/dynamic";
+
+const RelaySwapWidget = dynamic(
+  () => import("@reservoir0x/relay-kit-ui").then((mod) => mod.SwapWidget),
+  { ssr: false, loading: () => <div className="flex items-center justify-center py-20"><div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full"></div></div> }
+);
 
 const CONTRACT = "0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9";
 const NANSEN_API_KEY = process.env.NEXT_PUBLIC_NANSEN_API_KEY || "";
@@ -186,6 +192,7 @@ export default function Home() {
 
   const { address, isConnected } = useAccount();
   const { data: balance } = useBalance({ address });
+  const { data: walletClient } = useWalletClient();
   const strategy = STRATEGIES[activeStrategy];
 
   const totalAllocation = Object.values(portfolioSelected).reduce((s, v) => s + v, 0);
@@ -538,7 +545,7 @@ export default function Home() {
           )}
           {activeTab === "bridge" && (
             <motion.div key="bridge" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-              <BridgeTab />
+              <BridgeTab walletClient={walletClient} onConnectWallet={() => {}} />
             </motion.div>
           )}
           {activeTab === "dashboard" && (
@@ -1132,21 +1139,13 @@ function PoolsTab() {
 
 
 /* ========== BRIDGE TAB ========== */
-function BridgeTab() {
-  const [bridgeFrom, setBridgeFrom] = useState("Ethereum");
-  const BRIDGE_CHAINS = [
-    { name: "Ethereum", short: "ETH", color: "blue", chainId: 1 },
-    { name: "Arbitrum", short: "ARB", color: "blue", chainId: 42161 },
-    { name: "Optimism", short: "OP", color: "red", chainId: 10 },
-    { name: "Base", short: "BASE", color: "blue", chainId: 8453 },
-    { name: "Polygon", short: "MATIC", color: "purple", chainId: 137 },
-    { name: "BNB Chain", short: "BSC", color: "yellow", chainId: 56 },
-    { name: "Avalanche", short: "AVAX", color: "red", chainId: 43114 },
-    { name: "zkSync", short: "ZK", color: "purple", chainId: 324 },
-  ];
-
-  const selectedChain = BRIDGE_CHAINS.find(c => c.name === bridgeFrom);
-  const relayUrl = `https://www.relay.link/bridge/mantle${selectedChain ? `?fromChainId=${selectedChain.chainId}` : ""}`;
+function BridgeTab({ walletClient, onConnectWallet }: { walletClient: any; onConnectWallet?: () => void }) {
+  const adaptedWallet = walletClient ? (() => {
+    try {
+      const { adaptViemWallet } = require("@reservoir0x/relay-sdk");
+      return adaptViemWallet(walletClient);
+    } catch { return undefined; }
+  })() : undefined;
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -1155,94 +1154,40 @@ function BridgeTab() {
         <p className="text-xs text-white/40">Cross-chain transfers powered by Relay</p>
       </div>
 
-      {/* Bridge interface */}
-      <div className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden">
-        <div className="p-6">
-          {/* From chain */}
-          <div className="mb-4">
-            <div className="text-[10px] text-white/40 mb-2 uppercase tracking-wider">From Network</div>
-            <div className="grid grid-cols-4 gap-2">
-              {BRIDGE_CHAINS.map(chain => (
-                <button
-                  key={chain.name}
-                  onClick={() => setBridgeFrom(chain.name)}
-                  className={`p-2.5 rounded-xl text-center transition-all duration-200 border ${
-                    bridgeFrom === chain.name
-                      ? "border-blue-500/40 bg-blue-500/[0.08]"
-                      : "border-white/5 bg-white/[0.02] hover:border-white/10 hover:bg-white/[0.04]"
-                  }`}
-                >
-                  <div className="text-xs font-semibold text-white/80">{chain.short}</div>
-                  <div className="text-[8px] text-white/30 mt-0.5">{chain.name}</div>
-                </button>
-              ))}
-            </div>
-          </div>
+      {/* Relay SwapWidget - direct on-page bridge */}
+      <div className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden relay-widget-container">
+        <RelaySwapWidget
+          lockChainId={5000}
+          supportedWalletVMs={["evm"]}
+          wallet={adaptedWallet}
+          onConnectWallet={onConnectWallet}
+          multiWalletSupportEnabled={false}
+          onSwapError={(error: string) => {
+            console.error("Bridge error:", error);
+          }}
+        />
+      </div>
 
-          {/* Arrow */}
-          <div className="flex justify-center my-3">
-            <div className="w-8 h-8 rounded-lg bg-[#0d1220] border border-white/10 flex items-center justify-center text-white/50">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M5 10l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            </div>
-          </div>
-
-          {/* To chain (fixed Mantle) */}
-          <div className="mb-5">
-            <div className="text-[10px] text-white/40 mb-2 uppercase tracking-wider">To Network</div>
-            <div className="p-3 rounded-xl border border-cyan-500/30 bg-cyan-500/[0.06] flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center text-cyan-400 font-bold text-xs">M</div>
-              <div>
-                <div className="text-sm font-semibold text-white/90">Mantle</div>
-                <div className="text-[10px] text-white/40">ChainID 5000</div>
-              </div>
-              <div className="ml-auto text-[9px] text-cyan-400/60 bg-cyan-500/10 px-2 py-0.5 rounded-full border border-cyan-500/20">Destination</div>
-            </div>
-          </div>
-
-          {/* Supported tokens */}
-          <div className="mb-5 p-3 rounded-lg bg-white/[0.02] border border-white/5">
-            <div className="text-[10px] text-white/40 mb-2">Supported tokens</div>
-            <div className="flex flex-wrap gap-1.5">
-              {["ETH", "USDC", "USDT", "WETH", "DAI", "WBTC"].map(token => (
-                <span key={token} className="text-[9px] font-medium px-2 py-1 rounded-lg bg-white/5 text-white/60 border border-white/5">{token}</span>
-              ))}
-              <span className="text-[9px] text-white/30 px-2 py-1">+ many more</span>
-            </div>
-          </div>
-
-          {/* Stats */}
-          <div className="grid grid-cols-3 gap-3 mb-5">
-            <div className="text-center p-2 rounded-lg bg-white/[0.02] border border-white/5">
-              <div className="text-sm font-bold text-white/90">&lt;5s</div>
-              <div className="text-[9px] text-white/40">Speed</div>
-            </div>
-            <div className="text-center p-2 rounded-lg bg-white/[0.02] border border-white/5">
-              <div className="text-sm font-bold text-white/90">85+</div>
-              <div className="text-[9px] text-white/40">Networks</div>
-            </div>
-            <div className="text-center p-2 rounded-lg bg-white/[0.02] border border-white/5">
-              <div className="text-sm font-bold text-white/90">$5B+</div>
-              <div className="text-[9px] text-white/40">Volume</div>
-            </div>
-          </div>
-
-          {/* CTA */}
-          <a
-            href={relayUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="w-full py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold text-sm text-center hover:shadow-lg hover:shadow-blue-500/20 transition-all flex items-center justify-center gap-2"
-          >
-            Bridge to Mantle via Relay
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 12L12 4M12 4H6M12 4v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </a>
-
-          <div className="mt-3 flex items-center justify-center gap-3 text-[10px] text-white/30">
-            <span>Powered by Relay.link</span>
-            <span>·</span>
-            <a href="https://docs.relay.link/what-is-relay" target="_blank" rel="noreferrer" className="text-blue-400/60 hover:text-blue-400 transition-colors">Docs</a>
-          </div>
+      {/* Stats */}
+      <div className="grid grid-cols-3 gap-3 mt-5">
+        <div className="text-center p-2 rounded-lg bg-white/[0.02] border border-white/5">
+          <div className="text-sm font-bold text-white/90">&lt;5s</div>
+          <div className="text-[9px] text-white/40">Speed</div>
         </div>
+        <div className="text-center p-2 rounded-lg bg-white/[0.02] border border-white/5">
+          <div className="text-sm font-bold text-white/90">85+</div>
+          <div className="text-[9px] text-white/40">Networks</div>
+        </div>
+        <div className="text-center p-2 rounded-lg bg-white/[0.02] border border-white/5">
+          <div className="text-sm font-bold text-white/90">$5B+</div>
+          <div className="text-[9px] text-white/40">Volume</div>
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center justify-center gap-3 text-[10px] text-white/30">
+        <span>Powered by Relay.link</span>
+        <span>·</span>
+        <a href="https://docs.relay.link/what-is-relay" target="_blank" rel="noreferrer" className="text-blue-400/60 hover:text-blue-400 transition-colors">Docs</a>
       </div>
 
       {/* xStocks CCIP Bridge */}

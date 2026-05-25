@@ -53,6 +53,15 @@ html {
   background: hsl(var(--muted-foreground));
 }
 
+/* Relay Widget container styles */
+.relay-widget-container {
+  min-height: 400px;
+}
+.relay-widget-container > div {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
 /* Ticker scroll animation */
 @keyframes scroll {
   0% { transform: translateX(0); }
