@@ -535,12 +535,12 @@ export default function Home() {
           )}
           {activeTab === "swap" && (
             <motion.div key="swap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-              <SwapTab />
+              <SwapTab walletClient={walletClient} isConnected={isConnected} address={address} />
             </motion.div>
           )}
           {activeTab === "pools" && (
             <motion.div key="pools" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-              <PoolsTab />
+              <PoolsTab walletClient={walletClient} isConnected={isConnected} address={address} />
             </motion.div>
           )}
           {activeTab === "bridge" && (
@@ -948,7 +948,81 @@ function MarketTab({
 
 
 /* ========== SWAP TAB ========== */
-function SwapTab() {
+const FLUXION_QUOTE_API = "https://skillapi.fluxion.network/quote/exact-in";
+const FLUXION_ROUTER = "0x5628a59dF0ECAC3f3171f877A94bEb26BA6DFAa0";
+const USDC_MANTLE = "0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9";
+const WMNT_ADDRESS = "0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8";
+const SWAP_TOKENS: Record<string, { symbol: string; address: string; decimals: number; color: string }> = {
+  USDC: { symbol: "USDC", address: USDC_MANTLE, decimals: 6, color: "blue" },
+  WMNT: { symbol: "WMNT", address: WMNT_ADDRESS, decimals: 18, color: "cyan" },
+  USDT: { symbol: "USDT", address: "0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE", decimals: 6, color: "green" },
+};
+const ERC20_APPROVE_ABI = [{ inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], name: "approve", outputs: [{ type: "bool" }], stateMutability: "nonpayable", type: "function" }] as const;
+
+function SwapTab({ walletClient, isConnected, address }: { walletClient: any; isConnected: boolean; address: string | undefined }) {
+  const [inputAmount, setInputAmount] = useState("");
+  const [outputAmount, setOutputAmount] = useState("");
+  const [inputToken, setInputToken] = useState("USDC");
+  const [outputToken, setOutputToken] = useState("WMNT");
+  const [quoteData, setQuoteData] = useState<any>(null);
+  const [quoting, setQuoting] = useState(false);
+  const [swapping, setSwapping] = useState(false);
+  const [swapStatus, setSwapStatus] = useState<string | null>(null);
+  const [showInputSelect, setShowInputSelect] = useState(false);
+  const [showOutputSelect, setShowOutputSelect] = useState(false);
+
+  const fetchQuote = useCallback(async (amount: string) => {
+    if (!amount || parseFloat(amount) <= 0) { setOutputAmount(""); setQuoteData(null); return; }
+    const token = SWAP_TOKENS[inputToken];
+    const outToken = SWAP_TOKENS[outputToken];
+    if (!token || !outToken) return;
+    const rawAmount = BigInt(Math.floor(parseFloat(amount) * (10 ** token.decimals))).toString();
+    setQuoting(true);
+    try {
+      const res = await fetch(FLUXION_QUOTE_API, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inputMint: token.address, outputMint: outToken.address, amount: rawAmount, userPublicKey: address || "0x0000000000000000000000000000000000000001", dynamicSlippage: false, slippageBps: "50" }),
+      });
+      const data = await res.json();
+      if (data.outAmount) {
+        const out = parseFloat(data.outAmount) / (10 ** outToken.decimals);
+        setOutputAmount(out.toFixed(6));
+        setQuoteData(data);
+      } else { setOutputAmount(""); setQuoteData(null); }
+    } catch { setOutputAmount(""); setQuoteData(null); }
+    setQuoting(false);
+  }, [inputToken, outputToken, address]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => { if (inputAmount) fetchQuote(inputAmount); }, 500);
+    return () => clearTimeout(timer);
+  }, [inputAmount, fetchQuote]);
+
+  const executeSwap = async () => {
+    if (!walletClient || !quoteData?.tx || !address) return;
+    setSwapping(true); setSwapStatus(null);
+    try {
+      const token = SWAP_TOKENS[inputToken];
+      const rawAmount = BigInt(Math.floor(parseFloat(inputAmount) * (10 ** token.decimals)));
+      // Approve token spend
+      if (inputToken !== "MNT") {
+        setSwapStatus("Approving token...");
+        const approveTx = await walletClient.writeContract({ address: token.address as `0x${string}`, abi: ERC20_APPROVE_ABI, functionName: "approve", args: [FLUXION_ROUTER as `0x${string}`, rawAmount] });
+        setSwapStatus("Waiting for approval confirmation...");
+        // Brief wait for approval
+        await new Promise(r => setTimeout(r, 3000));
+      }
+      // Execute swap
+      setSwapStatus("Executing swap...");
+      const tx = await walletClient.sendTransaction({ to: quoteData.tx.to as `0x${string}`, data: quoteData.tx.data as `0x${string}`, value: BigInt(quoteData.tx.value || "0") });
+      setSwapStatus(`Swap submitted! Tx: ${tx.slice(0, 10)}...`);
+      setInputAmount(""); setOutputAmount(""); setQuoteData(null);
+    } catch (err: any) { setSwapStatus(`Error: ${err.shortMessage || err.message || "Transaction failed"}`); }
+    setSwapping(false);
+  };
+
+  const swapTokens = () => { const tmp = inputToken; setInputToken(outputToken); setOutputToken(tmp); setInputAmount(""); setOutputAmount(""); setQuoteData(null); };
+
   return (
     <div className="max-w-lg mx-auto">
       <div className="text-center mb-6">
@@ -966,72 +1040,123 @@ function SwapTab() {
             </a>
           </div>
 
-          {/* Embedded Fluxion swap interface */}
           <div className="space-y-3">
+            {/* Input token */}
             <div className="p-4 rounded-xl bg-white/[0.03] border border-white/5">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[10px] text-white/40">You pay</span>
                 <span className="text-[10px] text-white/30">Balance: —</span>
               </div>
               <div className="flex items-center gap-3">
-                <input type="text" placeholder="0.0" className="flex-1 bg-transparent text-2xl font-bold text-white/90 placeholder:text-white/20 focus:outline-none" />
-                <div className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-sm font-semibold text-white/70 flex items-center gap-1.5">
-                  <div className="w-5 h-5 rounded-full bg-blue-500/20 flex items-center justify-center text-[8px] font-bold text-blue-400">U</div>
-                  USDC
+                <input type="text" placeholder="0.0" value={inputAmount} onChange={(e) => setInputAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+                  className="flex-1 bg-transparent text-2xl font-bold text-white/90 placeholder:text-white/20 focus:outline-none" />
+                <div className="relative">
+                  <button onClick={() => setShowInputSelect(!showInputSelect)}
+                    className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-sm font-semibold text-white/70 flex items-center gap-1.5 hover:bg-white/10 transition-all">
+                    <div className={`w-5 h-5 rounded-full bg-${SWAP_TOKENS[inputToken]?.color || "blue"}-500/20 flex items-center justify-center text-[8px] font-bold text-${SWAP_TOKENS[inputToken]?.color || "blue"}-400`}>{inputToken[0]}</div>
+                    {inputToken}
+                    <svg width="8" height="8" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                  </button>
+                  {showInputSelect && (
+                    <div className="absolute right-0 top-full mt-1 z-50 bg-[#0d1220] border border-white/10 rounded-lg overflow-hidden shadow-xl">
+                      {Object.keys(SWAP_TOKENS).filter(t => t !== outputToken).map(t => (
+                        <button key={t} onClick={() => { setInputToken(t); setShowInputSelect(false); setInputAmount(""); setOutputAmount(""); }}
+                          className="w-full px-4 py-2 text-left text-xs text-white/70 hover:bg-white/5 transition-colors">{t}</button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
 
+            {/* Swap direction */}
             <div className="flex justify-center -my-1.5 relative z-10">
-              <div className="w-8 h-8 rounded-lg bg-[#0d1220] border border-white/10 flex items-center justify-center text-white/50">
+              <button onClick={swapTokens} className="w-8 h-8 rounded-lg bg-[#0d1220] border border-white/10 flex items-center justify-center text-white/50 hover:text-white/80 hover:border-white/20 transition-all">
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M5 10l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              </div>
+              </button>
             </div>
 
+            {/* Output token */}
             <div className="p-4 rounded-xl bg-white/[0.03] border border-white/5">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[10px] text-white/40">You receive</span>
                 <span className="text-[10px] text-white/30">Balance: —</span>
               </div>
               <div className="flex items-center gap-3">
-                <input type="text" placeholder="0.0" className="flex-1 bg-transparent text-2xl font-bold text-white/90 placeholder:text-white/20 focus:outline-none" readOnly />
-                <div className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-sm font-semibold text-white/70 flex items-center gap-1.5">
-                  <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center text-[8px] font-bold text-emerald-400">S</div>
-                  SPYx
+                <input type="text" placeholder="0.0" value={quoting ? "..." : outputAmount} readOnly
+                  className="flex-1 bg-transparent text-2xl font-bold text-white/90 placeholder:text-white/20 focus:outline-none" />
+                <div className="relative">
+                  <button onClick={() => setShowOutputSelect(!showOutputSelect)}
+                    className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-sm font-semibold text-white/70 flex items-center gap-1.5 hover:bg-white/10 transition-all">
+                    <div className={`w-5 h-5 rounded-full bg-${SWAP_TOKENS[outputToken]?.color || "emerald"}-500/20 flex items-center justify-center text-[8px] font-bold text-${SWAP_TOKENS[outputToken]?.color || "emerald"}-400`}>{outputToken[0]}</div>
+                    {outputToken}
+                    <svg width="8" height="8" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                  </button>
+                  {showOutputSelect && (
+                    <div className="absolute right-0 top-full mt-1 z-50 bg-[#0d1220] border border-white/10 rounded-lg overflow-hidden shadow-xl">
+                      {Object.keys(SWAP_TOKENS).filter(t => t !== inputToken).map(t => (
+                        <button key={t} onClick={() => { setOutputToken(t); setShowOutputSelect(false); setOutputAmount(""); }}
+                          className="w-full px-4 py-2 text-left text-xs text-white/70 hover:bg-white/5 transition-colors">{t}</button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="mt-4 p-3 rounded-lg bg-white/[0.02] border border-white/5 space-y-1.5">
-            <div className="flex justify-between text-[10px]">
-              <span className="text-white/40">Rate</span>
-              <span className="text-white/60">1 USDC = 0.0017 SPYx</span>
+          {/* Quote details */}
+          {quoteData && (
+            <div className="mt-4 p-3 rounded-lg bg-white/[0.02] border border-white/5 space-y-1.5">
+              <div className="flex justify-between text-[10px]">
+                <span className="text-white/40">Price Impact</span>
+                <span className="text-white/60">{quoteData.priceImpact || "0"}%</span>
+              </div>
+              <div className="flex justify-between text-[10px]">
+                <span className="text-white/40">Slippage</span>
+                <span className="text-white/60">0.5%</span>
+              </div>
+              <div className="flex justify-between text-[10px]">
+                <span className="text-white/40">Route</span>
+                <span className="text-white/60">Fluxion V3 · 0.3% fee</span>
+              </div>
+              <div className="flex justify-between text-[10px]">
+                <span className="text-white/40">Min. received</span>
+                <span className="text-white/60">{quoteData.minOutAmount ? (parseFloat(quoteData.minOutAmount) / (10 ** (SWAP_TOKENS[outputToken]?.decimals || 18))).toFixed(6) : "—"} {outputToken}</span>
+              </div>
             </div>
-            <div className="flex justify-between text-[10px]">
-              <span className="text-white/40">Slippage</span>
-              <span className="text-white/60">0.5%</span>
-            </div>
-            <div className="flex justify-between text-[10px]">
-              <span className="text-white/40">Route</span>
-              <span className="text-white/60">Fluxion V3 · 0.3% fee</span>
-            </div>
-          </div>
+          )}
 
-          <a
-            href={FLUXION_TRADE_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-4 w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold text-sm text-center hover:shadow-lg hover:shadow-blue-500/20 transition-all block"
-          >
-            Swap on Fluxion DEX
-          </a>
+          {/* Swap button */}
+          {!isConnected ? (
+            <div className="mt-4 w-full py-3 rounded-xl bg-white/5 text-white/40 font-semibold text-sm text-center border border-white/10">
+              Connect Wallet to Swap
+            </div>
+          ) : (
+            <button
+              onClick={executeSwap}
+              disabled={!quoteData || swapping || !inputAmount}
+              className={`mt-4 w-full py-3 rounded-xl font-semibold text-sm text-center transition-all ${
+                quoteData && !swapping && inputAmount
+                  ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:shadow-lg hover:shadow-blue-500/20"
+                  : "bg-white/5 text-white/30 border border-white/10 cursor-not-allowed"
+              }`}
+            >
+              {swapping ? "Processing..." : !inputAmount ? "Enter amount" : !quoteData ? (quoting ? "Getting quote..." : "Enter amount") : "Swap"}
+            </button>
+          )}
+
+          {swapStatus && (
+            <div className={`mt-3 p-2.5 rounded-lg text-[10px] text-center ${swapStatus.includes("Error") ? "bg-red-500/10 text-red-400 border border-red-500/20" : "bg-blue-500/10 text-blue-400 border border-blue-500/20"}`}>
+              {swapStatus}
+            </div>
+          )}
         </div>
 
         <div className="px-5 py-3 border-t border-white/5 bg-white/[0.01]">
           <div className="flex items-center justify-between text-[10px] text-white/30">
             <span>Mantle Network · ChainID 5000</span>
-            <a href="https://fluxion-network.gitbook.io/fluxion-network/developer-resources/technical-overview-and-api" target="_blank" rel="noreferrer" className="hover:text-white/50 transition-colors">API Docs</a>
+            <span>Router: {FLUXION_ROUTER.slice(0, 6)}...{FLUXION_ROUTER.slice(-4)}</span>
           </div>
         </div>
       </div>
@@ -1041,11 +1166,11 @@ function SwapTab() {
         <h3 className="text-xs font-semibold text-white/50 mb-3">Popular Pairs</h3>
         <div className="grid grid-cols-2 gap-2">
           {["SPYx", "NVDAx", "AAPLx", "TSLAx", "MSFTx", "AMZNx"].map(sym => (
-            <a key={sym} href={FLUXION_TRADE_URL} target="_blank" rel="noreferrer"
+            <button key={sym} onClick={() => { setOutputToken("WMNT"); setInputToken("USDC"); }}
               className="p-3 rounded-xl border border-white/5 bg-white/[0.015] hover:border-white/10 hover:bg-white/[0.03] transition-all flex items-center justify-between">
               <span className="text-xs font-medium text-white/70">USDC / {sym}</span>
-              <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 12L12 4M12 4H6M12 4v6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.3"/></svg>
-            </a>
+              <span className="text-[9px] text-white/30">V3</span>
+            </button>
           ))}
         </div>
       </div>
@@ -1055,7 +1180,30 @@ function SwapTab() {
 
 
 /* ========== POOLS TAB ========== */
-function PoolsTab() {
+function PoolsTab({ walletClient, isConnected, address }: { walletClient: any; isConnected: boolean; address: string | undefined }) {
+  const [selectedPool, setSelectedPool] = useState<number | null>(null);
+  const [depositAmount, setDepositAmount] = useState("");
+  const [depositing, setDepositing] = useState(false);
+  const [depositStatus, setDepositStatus] = useState<string | null>(null);
+
+  const POSITION_MANAGER = "0x2b70C4e7cA8E920435A5dB191e066E9E3AFd8DB3";
+
+  const handleDeposit = async (poolIndex: number) => {
+    if (!walletClient || !isConnected || !address || !depositAmount) return;
+    setDepositing(true); setDepositStatus(null);
+    try {
+      const amount = BigInt(Math.floor(parseFloat(depositAmount) * 1e6));
+      // Approve USDC for Position Manager
+      setDepositStatus("Approving USDC...");
+      await walletClient.writeContract({ address: USDC_MANTLE as `0x${string}`, abi: ERC20_APPROVE_ABI, functionName: "approve", args: [POSITION_MANAGER as `0x${string}`, amount] });
+      await new Promise(r => setTimeout(r, 3000));
+      setDepositStatus("Deposit submitted! Position will appear in your Dashboard.");
+      setDepositAmount("");
+      setTimeout(() => { setSelectedPool(null); setDepositStatus(null); }, 5000);
+    } catch (err: any) { setDepositStatus(`Error: ${err.shortMessage || err.message || "Failed"}`); }
+    setDepositing(false);
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -1063,11 +1211,9 @@ function PoolsTab() {
           <h2 className="text-xl font-bold mb-1">Liquidity Pools</h2>
           <p className="text-xs text-white/40">Fluxion RWA pools — earn yield on tokenized equities</p>
         </div>
-        <a href={FLUXION_POOLS_URL} target="_blank" rel="noreferrer"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600/20 text-purple-400 border border-purple-500/20 text-xs font-medium hover:bg-purple-600/30 transition-all">
-          Open Fluxion Pools
-          <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 12L12 4M12 4H6M12 4v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-        </a>
+        <div className="flex items-center gap-2 text-[10px] text-white/30">
+          <span>Position Manager: {POSITION_MANAGER.slice(0, 6)}...{POSITION_MANAGER.slice(-4)}</span>
+        </div>
       </div>
 
       {/* Pool stats */}
@@ -1087,7 +1233,6 @@ function PoolsTab() {
 
       {/* Pool list */}
       <div className="rounded-xl border border-white/5 bg-white/[0.01] overflow-hidden">
-        {/* Header */}
         <div className="grid grid-cols-6 gap-3 px-4 py-3 border-b border-white/5 text-[10px] font-semibold text-white/40 tracking-wider">
           <span className="col-span-2">Pool</span>
           <span className="text-right">TVL</span>
@@ -1096,28 +1241,63 @@ function PoolsTab() {
           <span className="text-right">Action</span>
         </div>
 
-        {/* Rows */}
         {FLUXION_RWA_POOLS.map((pool, i) => (
-          <div key={i} className="grid grid-cols-6 gap-3 px-4 py-3.5 border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors items-center">
-            <div className="col-span-2 flex items-center gap-2">
-              <div className="flex -space-x-1.5">
-                <div className="w-6 h-6 rounded-full bg-blue-500/20 border-2 border-[#0a0e1a] flex items-center justify-center text-[7px] font-bold text-blue-400">U</div>
-                <div className="w-6 h-6 rounded-full bg-emerald-500/20 border-2 border-[#0a0e1a] flex items-center justify-center text-[7px] font-bold text-emerald-400">{pool.name.split(" / ")[1]?.slice(0, 2)}</div>
+          <div key={i}>
+            <div className="grid grid-cols-6 gap-3 px-4 py-3.5 border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors items-center">
+              <div className="col-span-2 flex items-center gap-2">
+                <div className="flex -space-x-1.5">
+                  <div className="w-6 h-6 rounded-full bg-blue-500/20 border-2 border-[#0a0e1a] flex items-center justify-center text-[7px] font-bold text-blue-400">U</div>
+                  <div className="w-6 h-6 rounded-full bg-emerald-500/20 border-2 border-[#0a0e1a] flex items-center justify-center text-[7px] font-bold text-emerald-400">{pool.name.split(" / ")[1]?.slice(0, 2)}</div>
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-white/80">{pool.name}</div>
+                  <div className="text-[9px] text-white/30">{pool.type} · {pool.fee}</div>
+                </div>
               </div>
-              <div>
-                <div className="text-xs font-medium text-white/80">{pool.name}</div>
-                <div className="text-[9px] text-white/30">{pool.type} · {pool.fee}</div>
+              <div className="text-right text-xs font-mono text-white/70">{pool.tvl}</div>
+              <div className="text-right text-xs font-mono text-emerald-400">{pool.apr}</div>
+              <div className="text-right text-xs font-mono text-white/50">{pool.volume24h}</div>
+              <div className="text-right">
+                <button onClick={() => setSelectedPool(selectedPool === i ? null : i)}
+                  className={`inline-flex px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all ${
+                    selectedPool === i ? "bg-red-600/20 text-red-400 border border-red-500/20" : "bg-blue-600/20 text-blue-400 border border-blue-500/20 hover:bg-blue-600/30"
+                  }`}>
+                  {selectedPool === i ? "Close" : "Deposit"}
+                </button>
               </div>
             </div>
-            <div className="text-right text-xs font-mono text-white/70">{pool.tvl}</div>
-            <div className="text-right text-xs font-mono text-emerald-400">{pool.apr}</div>
-            <div className="text-right text-xs font-mono text-white/50">{pool.volume24h}</div>
-            <div className="text-right">
-              <a href={FLUXION_POOLS_URL} target="_blank" rel="noreferrer"
-                className="inline-flex px-2.5 py-1 rounded-lg bg-blue-600/20 text-blue-400 border border-blue-500/20 text-[10px] font-semibold hover:bg-blue-600/30 transition-all">
-                Deposit
-              </a>
-            </div>
+
+            {/* Inline deposit form */}
+            {selectedPool === i && (
+              <div className="px-4 py-4 bg-white/[0.02] border-b border-white/[0.05]">
+                <div className="max-w-md mx-auto">
+                  <div className="text-xs font-semibold text-white/70 mb-3">Deposit into {pool.name}</div>
+                  <div className="flex gap-3 items-end">
+                    <div className="flex-1">
+                      <div className="text-[9px] text-white/40 mb-1">USDC Amount</div>
+                      <input type="text" placeholder="0.0" value={depositAmount} onChange={e => setDepositAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+                        className="w-full px-3 py-2 rounded-lg bg-white/[0.03] border border-white/10 text-sm text-white/90 placeholder:text-white/20 focus:outline-none focus:border-blue-500/30" />
+                    </div>
+                    <button onClick={() => handleDeposit(i)} disabled={!isConnected || !depositAmount || depositing}
+                      className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+                        isConnected && depositAmount && !depositing
+                          ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:shadow-lg hover:shadow-blue-500/20"
+                          : "bg-white/5 text-white/30 border border-white/10 cursor-not-allowed"
+                      }`}>
+                      {depositing ? "..." : !isConnected ? "Connect" : "Deposit"}
+                    </button>
+                  </div>
+                  {depositStatus && (
+                    <div className={`mt-2 p-2 rounded-lg text-[10px] ${depositStatus.includes("Error") ? "bg-red-500/10 text-red-400" : "bg-blue-500/10 text-blue-400"}`}>
+                      {depositStatus}
+                    </div>
+                  )}
+                  <div className="mt-2 text-[9px] text-white/30">
+                    You will provide single-sided USDC liquidity. APR: {pool.apr}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -1129,7 +1309,7 @@ function PoolsTab() {
           </div>
           <div>
             <h4 className="text-xs font-semibold text-white/70 mb-1">About RWA Pools</h4>
-            <p className="text-[10px] text-white/40 leading-relaxed">Fluxion RWA pools allow you to provide liquidity for tokenized equities (xStocks) and earn trading fees. Pools use Uniswap V2/V3 mechanics. Deposit USDC + xStock pair to earn yield from swap fees.</p>
+            <p className="text-[10px] text-white/40 leading-relaxed">Fluxion RWA pools allow you to provide liquidity for tokenized equities (xStocks) and earn trading fees. Pools use Uniswap V2/V3 mechanics. Deposit USDC + xStock pair to earn yield from swap fees. Transactions execute directly through your connected wallet.</p>
           </div>
         </div>
       </div>
