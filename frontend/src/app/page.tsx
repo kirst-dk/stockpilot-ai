@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useAccount, useBalance, useWalletClient } from "wagmi";
+import { useAccount, useBalance, useWalletClient, usePublicClient } from "wagmi";
 import { formatEther } from "viem";
 import dynamic from "next/dynamic";
 
@@ -193,6 +193,7 @@ export default function Home() {
   const { address, isConnected } = useAccount();
   const { data: balance } = useBalance({ address });
   const { data: walletClient } = useWalletClient();
+  const publicClient = usePublicClient();
   const strategy = STRATEGIES[activeStrategy];
 
   const totalAllocation = Object.values(portfolioSelected).reduce((s, v) => s + v, 0);
@@ -551,7 +552,7 @@ export default function Home() {
           )}
           {activeTab === "swap" && (
             <motion.div key="swap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-              <SwapTab walletClient={walletClient} isConnected={isConnected} address={address} allXStocks={allXStocks} />
+              <SwapTab walletClient={walletClient} isConnected={isConnected} address={address} allXStocks={allXStocks} publicClient={publicClient} />
             </motion.div>
           )}
           {activeTab === "pools" && (
@@ -972,22 +973,25 @@ const WMNT_ADDRESS = "0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8";
 
 interface SwapToken { symbol: string; address: string; decimals: number; logo?: string; }
 
+const NATIVE_MNT_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
+
 const BASE_TOKENS: SwapToken[] = [
+  { symbol: "MNT", address: NATIVE_MNT_ADDRESS, decimals: 18 },
   { symbol: "USDC", address: "0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9", decimals: 6 },
   { symbol: "WMNT", address: "0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8", decimals: 18 },
   { symbol: "USDT", address: "0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE", decimals: 6 },
   { symbol: "WETH", address: "0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111", decimals: 18 },
   { symbol: "mETH", address: "0xcDA86A272531e8640cD7F1a92c01839911B90bb0", decimals: 18 },
-  { symbol: "METH", address: "0xcDA86A272531e8640cD7F1a92c01839911B90bb0", decimals: 18 },
 ];
 
 const ERC20_APPROVE_ABI = [{ inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], name: "approve", outputs: [{ type: "bool" }], stateMutability: "nonpayable", type: "function" }] as const;
+const ERC20_BALANCE_ABI = [{ inputs: [{ name: "account", type: "address" }], name: "balanceOf", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" }] as const;
 
-function SwapTab({ walletClient, isConnected, address, allXStocks }: { walletClient: any; isConnected: boolean; address: string | undefined; allXStocks: XStockAsset[] }) {
+function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient }: { walletClient: any; isConnected: boolean; address: string | undefined; allXStocks: XStockAsset[]; publicClient: any }) {
   const [inputAmount, setInputAmount] = useState("");
   const [outputAmount, setOutputAmount] = useState("");
-  const [inputToken, setInputToken] = useState<SwapToken>(BASE_TOKENS[0]);
-  const [outputToken, setOutputToken] = useState<SwapToken>(BASE_TOKENS[1]);
+  const [inputToken, setInputToken] = useState<SwapToken>(BASE_TOKENS[1]);
+  const [outputToken, setOutputToken] = useState<SwapToken>(BASE_TOKENS[2]);
   const [quoteData, setQuoteData] = useState<any>(null);
   const [quoting, setQuoting] = useState(false);
   const [swapping, setSwapping] = useState(false);
@@ -996,6 +1000,8 @@ function SwapTab({ walletClient, isConnected, address, allXStocks }: { walletCli
   const [showOutputSelect, setShowOutputSelect] = useState(false);
   const [tokenSearch, setTokenSearch] = useState("");
   const [customAddress, setCustomAddress] = useState("");
+  const [inputBalance, setInputBalance] = useState<string | null>(null);
+  const [outputBalance, setOutputBalance] = useState<string | null>(null);
 
   // Build full token list: base tokens + xStocks
   const allTokens: SwapToken[] = useMemo(() => {
@@ -1011,15 +1017,36 @@ function SwapTab({ walletClient, isConnected, address, allXStocks }: { walletCli
     return allTokens.filter(t => t.symbol.toLowerCase().includes(q) || t.address.toLowerCase().includes(q)).slice(0, 50);
   }, [allTokens, tokenSearch]);
 
+  // Fetch token balances
+  useEffect(() => {
+    if (!address || !publicClient) { setInputBalance(null); setOutputBalance(null); return; }
+    const fetchBal = async (token: SwapToken, setter: (v: string | null) => void) => {
+      try {
+        if (token.address === NATIVE_MNT_ADDRESS) {
+          const bal = await publicClient.getBalance({ address: address as `0x${string}` });
+          setter((Number(bal) / (10 ** 18)).toFixed(4));
+        } else {
+          const bal = await publicClient.readContract({ address: token.address as `0x${string}`, abi: ERC20_BALANCE_ABI, functionName: "balanceOf", args: [address as `0x${string}`] });
+          setter((Number(bal) / (10 ** token.decimals)).toFixed(token.decimals <= 6 ? 2 : 4));
+        }
+      } catch { setter(null); }
+    };
+    fetchBal(inputToken, setInputBalance);
+    fetchBal(outputToken, setOutputBalance);
+  }, [address, inputToken, outputToken, publicClient]);
+
   const fetchQuote = useCallback(async (amount: string) => {
     if (!amount || parseFloat(amount) <= 0) { setOutputAmount(""); setQuoteData(null); return; }
     if (!inputToken || !outputToken) return;
     const rawAmount = BigInt(Math.floor(parseFloat(amount) * (10 ** inputToken.decimals))).toString();
+    // For native MNT swaps, use WMNT address in the quote (router wraps automatically)
+    const inputMint = inputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : inputToken.address;
+    const outputMint = outputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : outputToken.address;
     setQuoting(true);
     try {
       const res = await fetch(FLUXION_QUOTE_API, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inputMint: inputToken.address, outputMint: outputToken.address, amount: rawAmount, userPublicKey: address || "0x0000000000000000000000000000000000000001", dynamicSlippage: false, slippageBps: "50" }),
+        body: JSON.stringify({ inputMint, outputMint, amount: rawAmount, userPublicKey: address || "0x0000000000000000000000000000000000000001", dynamicSlippage: false, slippageBps: "100" }),
       });
       const data = await res.json();
       if (data.outAmount) {
@@ -1042,14 +1069,15 @@ function SwapTab({ walletClient, isConnected, address, allXStocks }: { walletCli
     try {
       const rawAmount = BigInt(Math.floor(parseFloat(inputAmount) * (10 ** inputToken.decimals)));
       // Approve token spend (not needed for native MNT)
-      if (inputToken.symbol !== "MNT") {
+      if (inputToken.address !== NATIVE_MNT_ADDRESS) {
         setSwapStatus("Approving token...");
         await walletClient.writeContract({ address: inputToken.address as `0x${string}`, abi: ERC20_APPROVE_ABI, functionName: "approve", args: [FLUXION_ROUTER as `0x${string}`, rawAmount] });
         setSwapStatus("Waiting for approval...");
         await new Promise(r => setTimeout(r, 3000));
       }
       setSwapStatus("Executing swap...");
-      const tx = await walletClient.sendTransaction({ to: quoteData.tx.to as `0x${string}`, data: quoteData.tx.data as `0x${string}`, value: BigInt(quoteData.tx.value || "0") });
+      const value = inputToken.address === NATIVE_MNT_ADDRESS ? rawAmount.toString() : (quoteData.tx.value || "0");
+      const tx = await walletClient.sendTransaction({ to: quoteData.tx.to as `0x${string}`, data: quoteData.tx.data as `0x${string}`, value: BigInt(value) });
       setSwapStatus(`Swap submitted! Tx: ${tx.slice(0, 10)}...`);
       setInputAmount(""); setOutputAmount(""); setQuoteData(null);
     } catch (err: any) { setSwapStatus(`Error: ${err.shortMessage || err.message || "Transaction failed"}`); }
@@ -1128,7 +1156,10 @@ function SwapTab({ walletClient, isConnected, address, allXStocks }: { walletCli
             <div className="p-4 rounded-xl bg-white/[0.03] border border-white/5">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[10px] text-white/40">You pay</span>
-                <span className="text-[10px] text-white/30">Balance: —</span>
+                <span className="text-[10px] text-white/30 flex items-center gap-1">
+                  {inputBalance !== null ? `Balance: ${inputBalance}` : "Balance: —"}
+                  {inputBalance && <button onClick={() => setInputAmount(inputBalance)} className="text-blue-400 hover:text-blue-300 font-semibold">MAX</button>}
+                </span>
               </div>
               <div className="flex items-center gap-3">
                 <input type="text" placeholder="0.0" value={inputAmount} onChange={(e) => setInputAmount(e.target.value.replace(/[^0-9.]/g, ""))}
@@ -1156,7 +1187,7 @@ function SwapTab({ walletClient, isConnected, address, allXStocks }: { walletCli
             <div className="p-4 rounded-xl bg-white/[0.03] border border-white/5">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[10px] text-white/40">You receive</span>
-                <span className="text-[10px] text-white/30">Balance: —</span>
+                <span className="text-[10px] text-white/30">{outputBalance !== null ? `Balance: ${outputBalance}` : "Balance: —"}</span>
               </div>
               <div className="flex items-center gap-3">
                 <input type="text" placeholder="0.0" value={quoting ? "..." : outputAmount} readOnly
@@ -1198,8 +1229,9 @@ function SwapTab({ walletClient, isConnected, address, allXStocks }: { walletCli
 
           {/* No liquidity warning */}
           {quoteData?.error && (
-            <div className="mt-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-400 text-center">
-              No liquidity pool found for this pair. Try a different token or route through WMNT/USDC.
+            <div className="mt-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-400">
+              <div className="font-semibold mb-1">No liquidity pool found for this pair</div>
+              <div className="text-amber-400/70">Try swapping through WMNT or USDC as intermediary. Not all xStocks have direct trading pools yet — check <a href="https://fluxion.network/trade" target="_blank" rel="noreferrer" className="underline">fluxion.network/trade</a> for available pairs.</div>
             </div>
           )}
 
