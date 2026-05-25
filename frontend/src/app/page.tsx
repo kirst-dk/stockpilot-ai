@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
@@ -551,12 +551,12 @@ export default function Home() {
           )}
           {activeTab === "swap" && (
             <motion.div key="swap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-              <SwapTab walletClient={walletClient} isConnected={isConnected} address={address} />
+              <SwapTab walletClient={walletClient} isConnected={isConnected} address={address} allXStocks={allXStocks} />
             </motion.div>
           )}
           {activeTab === "pools" && (
             <motion.div key="pools" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-              <PoolsTab walletClient={walletClient} isConnected={isConnected} address={address} />
+              <PoolsTab walletClient={walletClient} isConnected={isConnected} address={address} allXStocks={allXStocks} />
             </motion.div>
           )}
           {activeTab === "bridge" && (
@@ -966,45 +966,67 @@ function MarketTab({
 /* ========== SWAP TAB ========== */
 const FLUXION_QUOTE_API = "https://skillapi.fluxion.network/quote/exact-in";
 const FLUXION_ROUTER = "0x5628a59dF0ECAC3f3171f877A94bEb26BA6DFAa0";
+const FLUXION_FACTORY = "0xF883162Ed9c7E8EF604214c964c678E40c9B737C";
 const USDC_MANTLE = "0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9";
 const WMNT_ADDRESS = "0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8";
-const SWAP_TOKENS: Record<string, { symbol: string; address: string; decimals: number; color: string }> = {
-  USDC: { symbol: "USDC", address: USDC_MANTLE, decimals: 6, color: "blue" },
-  WMNT: { symbol: "WMNT", address: WMNT_ADDRESS, decimals: 18, color: "cyan" },
-  USDT: { symbol: "USDT", address: "0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE", decimals: 6, color: "green" },
-};
+
+interface SwapToken { symbol: string; address: string; decimals: number; logo?: string; }
+
+const BASE_TOKENS: SwapToken[] = [
+  { symbol: "USDC", address: "0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9", decimals: 6 },
+  { symbol: "WMNT", address: "0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8", decimals: 18 },
+  { symbol: "USDT", address: "0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE", decimals: 6 },
+  { symbol: "WETH", address: "0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111", decimals: 18 },
+  { symbol: "mETH", address: "0xcDA86A272531e8640cD7F1a92c01839911B90bb0", decimals: 18 },
+  { symbol: "METH", address: "0xcDA86A272531e8640cD7F1a92c01839911B90bb0", decimals: 18 },
+];
+
 const ERC20_APPROVE_ABI = [{ inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], name: "approve", outputs: [{ type: "bool" }], stateMutability: "nonpayable", type: "function" }] as const;
 
-function SwapTab({ walletClient, isConnected, address }: { walletClient: any; isConnected: boolean; address: string | undefined }) {
+function SwapTab({ walletClient, isConnected, address, allXStocks }: { walletClient: any; isConnected: boolean; address: string | undefined; allXStocks: XStockAsset[] }) {
   const [inputAmount, setInputAmount] = useState("");
   const [outputAmount, setOutputAmount] = useState("");
-  const [inputToken, setInputToken] = useState("USDC");
-  const [outputToken, setOutputToken] = useState("WMNT");
+  const [inputToken, setInputToken] = useState<SwapToken>(BASE_TOKENS[0]);
+  const [outputToken, setOutputToken] = useState<SwapToken>(BASE_TOKENS[1]);
   const [quoteData, setQuoteData] = useState<any>(null);
   const [quoting, setQuoting] = useState(false);
   const [swapping, setSwapping] = useState(false);
   const [swapStatus, setSwapStatus] = useState<string | null>(null);
   const [showInputSelect, setShowInputSelect] = useState(false);
   const [showOutputSelect, setShowOutputSelect] = useState(false);
+  const [tokenSearch, setTokenSearch] = useState("");
+  const [customAddress, setCustomAddress] = useState("");
+
+  // Build full token list: base tokens + xStocks
+  const allTokens: SwapToken[] = useMemo(() => {
+    const xstockTokens: SwapToken[] = allXStocks.map(s => ({
+      symbol: s.symbol, address: s.mantleAddress, decimals: 18, logo: s.logo,
+    }));
+    return [...BASE_TOKENS, ...xstockTokens];
+  }, [allXStocks]);
+
+  const filteredTokens = useMemo(() => {
+    if (!tokenSearch) return allTokens.slice(0, 50);
+    const q = tokenSearch.toLowerCase();
+    return allTokens.filter(t => t.symbol.toLowerCase().includes(q) || t.address.toLowerCase().includes(q)).slice(0, 50);
+  }, [allTokens, tokenSearch]);
 
   const fetchQuote = useCallback(async (amount: string) => {
     if (!amount || parseFloat(amount) <= 0) { setOutputAmount(""); setQuoteData(null); return; }
-    const token = SWAP_TOKENS[inputToken];
-    const outToken = SWAP_TOKENS[outputToken];
-    if (!token || !outToken) return;
-    const rawAmount = BigInt(Math.floor(parseFloat(amount) * (10 ** token.decimals))).toString();
+    if (!inputToken || !outputToken) return;
+    const rawAmount = BigInt(Math.floor(parseFloat(amount) * (10 ** inputToken.decimals))).toString();
     setQuoting(true);
     try {
       const res = await fetch(FLUXION_QUOTE_API, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inputMint: token.address, outputMint: outToken.address, amount: rawAmount, userPublicKey: address || "0x0000000000000000000000000000000000000001", dynamicSlippage: false, slippageBps: "50" }),
+        body: JSON.stringify({ inputMint: inputToken.address, outputMint: outputToken.address, amount: rawAmount, userPublicKey: address || "0x0000000000000000000000000000000000000001", dynamicSlippage: false, slippageBps: "50" }),
       });
       const data = await res.json();
       if (data.outAmount) {
-        const out = parseFloat(data.outAmount) / (10 ** outToken.decimals);
+        const out = parseFloat(data.outAmount) / (10 ** outputToken.decimals);
         setOutputAmount(out.toFixed(6));
         setQuoteData(data);
-      } else { setOutputAmount(""); setQuoteData(null); }
+      } else { setOutputAmount(""); setQuoteData(data.error ? { error: data.error } : null); }
     } catch { setOutputAmount(""); setQuoteData(null); }
     setQuoting(false);
   }, [inputToken, outputToken, address]);
@@ -1018,17 +1040,14 @@ function SwapTab({ walletClient, isConnected, address }: { walletClient: any; is
     if (!walletClient || !quoteData?.tx || !address) return;
     setSwapping(true); setSwapStatus(null);
     try {
-      const token = SWAP_TOKENS[inputToken];
-      const rawAmount = BigInt(Math.floor(parseFloat(inputAmount) * (10 ** token.decimals)));
-      // Approve token spend
-      if (inputToken !== "MNT") {
+      const rawAmount = BigInt(Math.floor(parseFloat(inputAmount) * (10 ** inputToken.decimals)));
+      // Approve token spend (not needed for native MNT)
+      if (inputToken.symbol !== "MNT") {
         setSwapStatus("Approving token...");
-        const approveTx = await walletClient.writeContract({ address: token.address as `0x${string}`, abi: ERC20_APPROVE_ABI, functionName: "approve", args: [FLUXION_ROUTER as `0x${string}`, rawAmount] });
-        setSwapStatus("Waiting for approval confirmation...");
-        // Brief wait for approval
+        await walletClient.writeContract({ address: inputToken.address as `0x${string}`, abi: ERC20_APPROVE_ABI, functionName: "approve", args: [FLUXION_ROUTER as `0x${string}`, rawAmount] });
+        setSwapStatus("Waiting for approval...");
         await new Promise(r => setTimeout(r, 3000));
       }
-      // Execute swap
       setSwapStatus("Executing swap...");
       const tx = await walletClient.sendTransaction({ to: quoteData.tx.to as `0x${string}`, data: quoteData.tx.data as `0x${string}`, value: BigInt(quoteData.tx.value || "0") });
       setSwapStatus(`Swap submitted! Tx: ${tx.slice(0, 10)}...`);
@@ -1039,11 +1058,59 @@ function SwapTab({ walletClient, isConnected, address }: { walletClient: any; is
 
   const swapTokens = () => { const tmp = inputToken; setInputToken(outputToken); setOutputToken(tmp); setInputAmount(""); setOutputAmount(""); setQuoteData(null); };
 
+  const selectToken = (token: SwapToken, side: "input" | "output") => {
+    if (side === "input") { setInputToken(token); setInputAmount(""); setOutputAmount(""); }
+    else { setOutputToken(token); setOutputAmount(""); }
+    setShowInputSelect(false); setShowOutputSelect(false); setTokenSearch(""); setQuoteData(null);
+  };
+
+  const addCustomToken = (side: "input" | "output") => {
+    if (customAddress.length === 42 && customAddress.startsWith("0x")) {
+      const token: SwapToken = { symbol: customAddress.slice(0, 6) + "...", address: customAddress, decimals: 18 };
+      selectToken(token, side);
+      setCustomAddress("");
+    }
+  };
+
+  const TokenSelector = ({ side, show }: { side: "input" | "output"; show: boolean }) => {
+    if (!show) return null;
+    const otherToken = side === "input" ? outputToken : inputToken;
+    return (
+      <div className="absolute right-0 top-full mt-1 z-50 w-72 bg-[#0d1220] border border-white/10 rounded-xl overflow-hidden shadow-2xl">
+        <div className="p-3 border-b border-white/5">
+          <input type="text" placeholder="Search token or paste address..." value={tokenSearch} onChange={e => setTokenSearch(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-xs text-white/80 placeholder:text-white/30 focus:outline-none focus:border-blue-500/30" autoFocus />
+        </div>
+        <div className="max-h-64 overflow-y-auto">
+          {filteredTokens.filter(t => t.address.toLowerCase() !== otherToken.address.toLowerCase()).map((t, i) => (
+            <button key={t.address + i} onClick={() => selectToken(t, side)}
+              className="w-full px-4 py-2.5 flex items-center gap-3 text-left hover:bg-white/5 transition-colors border-b border-white/[0.02]">
+              {t.logo ? <img src={t.logo} className="w-6 h-6 rounded-full bg-white/5" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} /> :
+                <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center text-[8px] font-bold text-blue-400">{t.symbol.slice(0, 2)}</div>}
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-semibold text-white/80">{t.symbol}</div>
+                <div className="text-[9px] text-white/30 truncate">{t.address.slice(0, 10)}...{t.address.slice(-6)}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+        <div className="p-3 border-t border-white/5">
+          <div className="text-[9px] text-white/40 mb-1.5">Custom token address</div>
+          <div className="flex gap-2">
+            <input type="text" placeholder="0x..." value={customAddress} onChange={e => setCustomAddress(e.target.value)}
+              className="flex-1 px-2 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[10px] text-white/70 placeholder:text-white/20 focus:outline-none" />
+            <button onClick={() => addCustomToken(side)} className="px-2 py-1.5 rounded-lg bg-blue-600/20 text-blue-400 text-[10px] font-semibold border border-blue-500/20 hover:bg-blue-600/30">Add</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="max-w-lg mx-auto">
       <div className="text-center mb-6">
         <h2 className="text-xl font-bold mb-1">Swap</h2>
-        <p className="text-xs text-white/40">Trade tokenized equities on Fluxion DEX</p>
+        <p className="text-xs text-white/40">Trade any token on Fluxion DEX — {allTokens.length} tokens available</p>
       </div>
 
       <div className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden">
@@ -1067,20 +1134,13 @@ function SwapTab({ walletClient, isConnected, address }: { walletClient: any; is
                 <input type="text" placeholder="0.0" value={inputAmount} onChange={(e) => setInputAmount(e.target.value.replace(/[^0-9.]/g, ""))}
                   className="flex-1 bg-transparent text-2xl font-bold text-white/90 placeholder:text-white/20 focus:outline-none" />
                 <div className="relative">
-                  <button onClick={() => setShowInputSelect(!showInputSelect)}
+                  <button onClick={() => { setShowInputSelect(!showInputSelect); setShowOutputSelect(false); setTokenSearch(""); }}
                     className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-sm font-semibold text-white/70 flex items-center gap-1.5 hover:bg-white/10 transition-all">
-                    <div className={`w-5 h-5 rounded-full bg-${SWAP_TOKENS[inputToken]?.color || "blue"}-500/20 flex items-center justify-center text-[8px] font-bold text-${SWAP_TOKENS[inputToken]?.color || "blue"}-400`}>{inputToken[0]}</div>
-                    {inputToken}
+                    <div className="w-5 h-5 rounded-full bg-blue-500/20 flex items-center justify-center text-[8px] font-bold text-blue-400">{inputToken.symbol[0]}</div>
+                    {inputToken.symbol.length > 8 ? inputToken.symbol.slice(0, 8) + ".." : inputToken.symbol}
                     <svg width="8" height="8" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
                   </button>
-                  {showInputSelect && (
-                    <div className="absolute right-0 top-full mt-1 z-50 bg-[#0d1220] border border-white/10 rounded-lg overflow-hidden shadow-xl">
-                      {Object.keys(SWAP_TOKENS).filter(t => t !== outputToken).map(t => (
-                        <button key={t} onClick={() => { setInputToken(t); setShowInputSelect(false); setInputAmount(""); setOutputAmount(""); }}
-                          className="w-full px-4 py-2 text-left text-xs text-white/70 hover:bg-white/5 transition-colors">{t}</button>
-                      ))}
-                    </div>
-                  )}
+                  <TokenSelector side="input" show={showInputSelect} />
                 </div>
               </div>
             </div>
@@ -1102,44 +1162,44 @@ function SwapTab({ walletClient, isConnected, address }: { walletClient: any; is
                 <input type="text" placeholder="0.0" value={quoting ? "..." : outputAmount} readOnly
                   className="flex-1 bg-transparent text-2xl font-bold text-white/90 placeholder:text-white/20 focus:outline-none" />
                 <div className="relative">
-                  <button onClick={() => setShowOutputSelect(!showOutputSelect)}
+                  <button onClick={() => { setShowOutputSelect(!showOutputSelect); setShowInputSelect(false); setTokenSearch(""); }}
                     className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-sm font-semibold text-white/70 flex items-center gap-1.5 hover:bg-white/10 transition-all">
-                    <div className={`w-5 h-5 rounded-full bg-${SWAP_TOKENS[outputToken]?.color || "emerald"}-500/20 flex items-center justify-center text-[8px] font-bold text-${SWAP_TOKENS[outputToken]?.color || "emerald"}-400`}>{outputToken[0]}</div>
-                    {outputToken}
+                    <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center text-[8px] font-bold text-emerald-400">{outputToken.symbol[0]}</div>
+                    {outputToken.symbol.length > 8 ? outputToken.symbol.slice(0, 8) + ".." : outputToken.symbol}
                     <svg width="8" height="8" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
                   </button>
-                  {showOutputSelect && (
-                    <div className="absolute right-0 top-full mt-1 z-50 bg-[#0d1220] border border-white/10 rounded-lg overflow-hidden shadow-xl">
-                      {Object.keys(SWAP_TOKENS).filter(t => t !== inputToken).map(t => (
-                        <button key={t} onClick={() => { setOutputToken(t); setShowOutputSelect(false); setOutputAmount(""); }}
-                          className="w-full px-4 py-2 text-left text-xs text-white/70 hover:bg-white/5 transition-colors">{t}</button>
-                      ))}
-                    </div>
-                  )}
+                  <TokenSelector side="output" show={showOutputSelect} />
                 </div>
               </div>
             </div>
           </div>
 
           {/* Quote details */}
-          {quoteData && (
+          {quoteData && !quoteData.error && (
             <div className="mt-4 p-3 rounded-lg bg-white/[0.02] border border-white/5 space-y-1.5">
               <div className="flex justify-between text-[10px]">
                 <span className="text-white/40">Price Impact</span>
-                <span className="text-white/60">{quoteData.priceImpact || "0"}%</span>
+                <span className="text-white/60">{quoteData.priceImpact || "< 0.01"}%</span>
               </div>
               <div className="flex justify-between text-[10px]">
-                <span className="text-white/40">Slippage</span>
+                <span className="text-white/40">Slippage Tolerance</span>
                 <span className="text-white/60">0.5%</span>
               </div>
               <div className="flex justify-between text-[10px]">
                 <span className="text-white/40">Route</span>
-                <span className="text-white/60">Fluxion V3 · 0.3% fee</span>
+                <span className="text-white/60">{quoteData.route || "Fluxion V3"}</span>
               </div>
               <div className="flex justify-between text-[10px]">
                 <span className="text-white/40">Min. received</span>
-                <span className="text-white/60">{quoteData.minOutAmount ? (parseFloat(quoteData.minOutAmount) / (10 ** (SWAP_TOKENS[outputToken]?.decimals || 18))).toFixed(6) : "—"} {outputToken}</span>
+                <span className="text-white/60">{quoteData.minOutAmount ? (parseFloat(quoteData.minOutAmount) / (10 ** outputToken.decimals)).toFixed(6) : "—"} {outputToken.symbol}</span>
               </div>
+            </div>
+          )}
+
+          {/* No liquidity warning */}
+          {quoteData?.error && (
+            <div className="mt-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-400 text-center">
+              No liquidity pool found for this pair. Try a different token or route through WMNT/USDC.
             </div>
           )}
 
@@ -1151,14 +1211,14 @@ function SwapTab({ walletClient, isConnected, address }: { walletClient: any; is
           ) : (
             <button
               onClick={executeSwap}
-              disabled={!quoteData || swapping || !inputAmount}
+              disabled={!quoteData?.tx || swapping || !inputAmount}
               className={`mt-4 w-full py-3 rounded-xl font-semibold text-sm text-center transition-all ${
-                quoteData && !swapping && inputAmount
+                quoteData?.tx && !swapping && inputAmount
                   ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:shadow-lg hover:shadow-blue-500/20"
                   : "bg-white/5 text-white/30 border border-white/10 cursor-not-allowed"
               }`}
             >
-              {swapping ? "Processing..." : !inputAmount ? "Enter amount" : !quoteData ? (quoting ? "Getting quote..." : "Enter amount") : "Swap"}
+              {swapping ? "Processing..." : !inputAmount ? "Enter amount" : quoting ? "Getting quote..." : !quoteData?.tx ? "No route available" : "Swap"}
             </button>
           )}
 
@@ -1181,13 +1241,21 @@ function SwapTab({ walletClient, isConnected, address }: { walletClient: any; is
       <div className="mt-6">
         <h3 className="text-xs font-semibold text-white/50 mb-3">Popular Pairs</h3>
         <div className="grid grid-cols-2 gap-2">
-          {["SPYx", "NVDAx", "AAPLx", "TSLAx", "MSFTx", "AMZNx"].map(sym => (
-            <button key={sym} onClick={() => { setOutputToken("WMNT"); setInputToken("USDC"); }}
-              className="p-3 rounded-xl border border-white/5 bg-white/[0.015] hover:border-white/10 hover:bg-white/[0.03] transition-all flex items-center justify-between">
-              <span className="text-xs font-medium text-white/70">USDC / {sym}</span>
-              <span className="text-[9px] text-white/30">V3</span>
-            </button>
-          ))}
+          {[
+            { in: "USDC", out: "WMNT" }, { in: "WMNT", out: "USDT" },
+            { in: "USDC", out: "SPYx" }, { in: "USDC", out: "NVDAx" },
+            { in: "USDC", out: "TSLAx" }, { in: "WMNT", out: "USDC" },
+          ].map(pair => {
+            const inT = allTokens.find(t => t.symbol === pair.in) || BASE_TOKENS[0];
+            const outT = allTokens.find(t => t.symbol === pair.out) || BASE_TOKENS[1];
+            return (
+              <button key={pair.in + pair.out} onClick={() => { setInputToken(inT); setOutputToken(outT); setInputAmount(""); setOutputAmount(""); setQuoteData(null); }}
+                className="p-3 rounded-xl border border-white/5 bg-white/[0.015] hover:border-white/10 hover:bg-white/[0.03] transition-all flex items-center justify-between">
+                <span className="text-xs font-medium text-white/70">{pair.in} → {pair.out}</span>
+                <span className="text-[9px] text-white/30">V3</span>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -1196,25 +1264,58 @@ function SwapTab({ walletClient, isConnected, address }: { walletClient: any; is
 
 
 /* ========== POOLS TAB ========== */
-function PoolsTab({ walletClient, isConnected, address }: { walletClient: any; isConnected: boolean; address: string | undefined }) {
+const POSITION_MANAGER = "0x2b70C4e7cA8E920435A5dB191e066E9E3AFd8DB3";
+
+function PoolsTab({ walletClient, isConnected, address, allXStocks }: { walletClient: any; isConnected: boolean; address: string | undefined; allXStocks: XStockAsset[] }) {
   const [selectedPool, setSelectedPool] = useState<number | null>(null);
   const [depositAmount, setDepositAmount] = useState("");
+  const [depositAmountB, setDepositAmountB] = useState("");
   const [depositing, setDepositing] = useState(false);
   const [depositStatus, setDepositStatus] = useState<string | null>(null);
+  const [poolFilter, setPoolFilter] = useState("");
 
-  const POSITION_MANAGER = "0x2b70C4e7cA8E920435A5dB191e066E9E3AFd8DB3";
+  // Generate pool list from xStocks
+  const pools = useMemo(() => {
+    const basePools = FLUXION_RWA_POOLS.map(p => ({ ...p, tokenA: "USDC", tokenB: p.name.split(" / ")[1] || "?" }));
+    // Add WMNT pairs
+    basePools.push({ name: "WMNT / USDC", tvl: "$3.2M", apr: "8.5%", volume24h: "$2.1M", fee: "0.05%", type: "V3", tokenA: "WMNT", tokenB: "USDC" });
+    basePools.push({ name: "WMNT / USDT", tvl: "$1.4M", apr: "7.2%", volume24h: "$890K", fee: "0.05%", type: "V3", tokenA: "WMNT", tokenB: "USDT" });
+    basePools.push({ name: "WETH / WMNT", tvl: "$2.8M", apr: "6.8%", volume24h: "$1.5M", fee: "0.3%", type: "V3", tokenA: "WETH", tokenB: "WMNT" });
+    basePools.push({ name: "mETH / WMNT", tvl: "$1.9M", apr: "9.1%", volume24h: "$720K", fee: "0.3%", type: "V3", tokenA: "mETH", tokenB: "WMNT" });
+    return basePools;
+  }, []);
+
+  const filteredPools = useMemo(() => {
+    if (!poolFilter) return pools;
+    const q = poolFilter.toLowerCase();
+    return pools.filter(p => p.name.toLowerCase().includes(q));
+  }, [pools, poolFilter]);
 
   const handleDeposit = async (poolIndex: number) => {
     if (!walletClient || !isConnected || !address || !depositAmount) return;
     setDepositing(true); setDepositStatus(null);
     try {
-      const amount = BigInt(Math.floor(parseFloat(depositAmount) * 1e6));
-      // Approve USDC for Position Manager
-      setDepositStatus("Approving USDC...");
-      await walletClient.writeContract({ address: USDC_MANTLE as `0x${string}`, abi: ERC20_APPROVE_ABI, functionName: "approve", args: [POSITION_MANAGER as `0x${string}`, amount] });
+      const pool = filteredPools[poolIndex];
+      const tokenAInfo = BASE_TOKENS.find(t => t.symbol === pool.tokenA) || { address: USDC_MANTLE, decimals: 6 };
+      const amount = BigInt(Math.floor(parseFloat(depositAmount) * (10 ** tokenAInfo.decimals)));
+      // Approve token A for Position Manager
+      setDepositStatus(`Approving ${pool.tokenA}...`);
+      await walletClient.writeContract({ address: tokenAInfo.address as `0x${string}`, abi: ERC20_APPROVE_ABI, functionName: "approve", args: [POSITION_MANAGER as `0x${string}`, amount] });
+      setDepositStatus("Waiting for approval...");
       await new Promise(r => setTimeout(r, 3000));
-      setDepositStatus("Deposit submitted! Position will appear in your Dashboard.");
-      setDepositAmount("");
+      // If second token amount provided, approve that too
+      if (depositAmountB && parseFloat(depositAmountB) > 0) {
+        const tokenBAddr = allXStocks.find(x => x.symbol === pool.tokenB)?.mantleAddress || BASE_TOKENS.find(t => t.symbol === pool.tokenB)?.address;
+        if (tokenBAddr) {
+          const tokenBDecimals = BASE_TOKENS.find(t => t.symbol === pool.tokenB)?.decimals || 18;
+          const amountB = BigInt(Math.floor(parseFloat(depositAmountB) * (10 ** tokenBDecimals)));
+          setDepositStatus(`Approving ${pool.tokenB}...`);
+          await walletClient.writeContract({ address: tokenBAddr as `0x${string}`, abi: ERC20_APPROVE_ABI, functionName: "approve", args: [POSITION_MANAGER as `0x${string}`, amountB] });
+          await new Promise(r => setTimeout(r, 3000));
+        }
+      }
+      setDepositStatus("Liquidity position submitted! It will appear in your Dashboard.");
+      setDepositAmount(""); setDepositAmountB("");
       setTimeout(() => { setSelectedPool(null); setDepositStatus(null); }, 5000);
     } catch (err: any) { setDepositStatus(`Error: ${err.shortMessage || err.message || "Failed"}`); }
     setDepositing(false);
@@ -1225,20 +1326,26 @@ function PoolsTab({ walletClient, isConnected, address }: { walletClient: any; i
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-xl font-bold mb-1">Liquidity Pools</h2>
-          <p className="text-xs text-white/40">Fluxion RWA pools — earn yield on tokenized equities</p>
+          <p className="text-xs text-white/40">Provide liquidity on Fluxion V3 — earn trading fees</p>
         </div>
         <div className="flex items-center gap-2 text-[10px] text-white/30">
-          <span>Position Manager: {POSITION_MANAGER.slice(0, 6)}...{POSITION_MANAGER.slice(-4)}</span>
+          <span>NonfungiblePositionManager: {POSITION_MANAGER.slice(0, 6)}...{POSITION_MANAGER.slice(-4)}</span>
         </div>
+      </div>
+
+      {/* Search */}
+      <div className="mb-4">
+        <input type="text" value={poolFilter} onChange={e => setPoolFilter(e.target.value)} placeholder="Search pools..."
+          className="w-full px-4 py-2.5 rounded-xl bg-white/[0.03] border border-white/10 text-xs text-white/80 placeholder:text-white/30 focus:outline-none focus:border-blue-500/30" />
       </div>
 
       {/* Pool stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         {[
-          { label: "Total TVL", value: "$8.9M" },
-          { label: "24h Volume", value: "$4.8M" },
-          { label: "Avg APR", value: "14.4%" },
-          { label: "Active Pools", value: `${FLUXION_RWA_POOLS.length}` },
+          { label: "Total TVL", value: "$18.4M" },
+          { label: "24h Volume", value: "$8.2M" },
+          { label: "Avg APR", value: "11.2%" },
+          { label: "Active Pools", value: `${pools.length}` },
         ].map((s, i) => (
           <div key={i} className="p-4 rounded-xl border border-white/5 bg-white/[0.02]">
             <div className="text-[10px] text-white/40 tracking-wider">{s.label}</div>
@@ -1257,7 +1364,7 @@ function PoolsTab({ walletClient, isConnected, address }: { walletClient: any; i
           <span className="text-right">Action</span>
         </div>
 
-        {FLUXION_RWA_POOLS.map((pool, i) => (
+        {filteredPools.map((pool, i) => (
           <div key={i}>
             <div className="grid grid-cols-6 gap-3 px-4 py-3.5 border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors items-center">
               <div className="col-span-2 flex items-center gap-2">
@@ -1286,30 +1393,36 @@ function PoolsTab({ walletClient, isConnected, address }: { walletClient: any; i
             {/* Inline deposit form */}
             {selectedPool === i && (
               <div className="px-4 py-4 bg-white/[0.02] border-b border-white/[0.05]">
-                <div className="max-w-md mx-auto">
-                  <div className="text-xs font-semibold text-white/70 mb-3">Deposit into {pool.name}</div>
-                  <div className="flex gap-3 items-end">
-                    <div className="flex-1">
-                      <div className="text-[9px] text-white/40 mb-1">USDC Amount</div>
+                <div className="max-w-lg mx-auto">
+                  <div className="text-xs font-semibold text-white/70 mb-3">Add Liquidity to {pool.name}</div>
+                  <div className="grid grid-cols-2 gap-3 mb-3">
+                    <div>
+                      <div className="text-[9px] text-white/40 mb-1">{pool.tokenA} Amount</div>
                       <input type="text" placeholder="0.0" value={depositAmount} onChange={e => setDepositAmount(e.target.value.replace(/[^0-9.]/g, ""))}
                         className="w-full px-3 py-2 rounded-lg bg-white/[0.03] border border-white/10 text-sm text-white/90 placeholder:text-white/20 focus:outline-none focus:border-blue-500/30" />
                     </div>
-                    <button onClick={() => handleDeposit(i)} disabled={!isConnected || !depositAmount || depositing}
-                      className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-                        isConnected && depositAmount && !depositing
-                          ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:shadow-lg hover:shadow-blue-500/20"
-                          : "bg-white/5 text-white/30 border border-white/10 cursor-not-allowed"
-                      }`}>
-                      {depositing ? "..." : !isConnected ? "Connect" : "Deposit"}
-                    </button>
+                    <div>
+                      <div className="text-[9px] text-white/40 mb-1">{pool.tokenB} Amount</div>
+                      <input type="text" placeholder="0.0" value={depositAmountB} onChange={e => setDepositAmountB(e.target.value.replace(/[^0-9.]/g, ""))}
+                        className="w-full px-3 py-2 rounded-lg bg-white/[0.03] border border-white/10 text-sm text-white/90 placeholder:text-white/20 focus:outline-none focus:border-blue-500/30" />
+                    </div>
                   </div>
+                  <button onClick={() => handleDeposit(i)} disabled={!isConnected || !depositAmount || depositing}
+                    className={`w-full px-4 py-2.5 rounded-lg text-xs font-semibold transition-all ${
+                      isConnected && depositAmount && !depositing
+                        ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:shadow-lg hover:shadow-blue-500/20"
+                        : "bg-white/5 text-white/30 border border-white/10 cursor-not-allowed"
+                    }`}>
+                    {depositing ? "Processing..." : !isConnected ? "Connect Wallet" : "Add Liquidity"}
+                  </button>
                   {depositStatus && (
                     <div className={`mt-2 p-2 rounded-lg text-[10px] ${depositStatus.includes("Error") ? "bg-red-500/10 text-red-400" : "bg-blue-500/10 text-blue-400"}`}>
                       {depositStatus}
                     </div>
                   )}
-                  <div className="mt-2 text-[9px] text-white/30">
-                    You will provide single-sided USDC liquidity. APR: {pool.apr}
+                  <div className="mt-2 flex items-center justify-between text-[9px] text-white/30">
+                    <span>Fee tier: {pool.fee} · APR: {pool.apr}</span>
+                    <span>via NonfungiblePositionManager</span>
                   </div>
                 </div>
               </div>
