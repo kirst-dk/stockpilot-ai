@@ -320,26 +320,42 @@ export default function Home() {
     setStrategyAiLoading(false);
   };
 
-  // Fetch xStocks
+  // Fetch xStocks — use static pre-built data (avoids CORS), fallback to API with pagination
   useEffect(() => {
     async function fetchXStocks() {
       try {
-        const res = await fetch("https://api.xstocks.fi/api/v2/public/assets");
-        const data = await res.json();
-        const assets = data.nodes || data;
-        const mantleAssets: XStockAsset[] = [];
-        for (const a of assets) {
-          const mantle = (a.deployments || []).find((d: { network: string }) => d.network === "Mantle");
-          if (mantle) {
-            mantleAssets.push({
-              symbol: a.symbol, name: a.name || a.description || a.symbol,
-              logo: a.logo || "", mantleAddress: mantle.address,
-              networks: (a.deployments || []).map((d: { network: string }) => d.network),
-            });
+        // First try static pre-built data (no CORS issues)
+        const staticRes = await fetch("/xstocks-data.json");
+        if (staticRes.ok) {
+          const staticData: XStockAsset[] = await staticRes.json();
+          if (staticData.length > 0) {
+            setAllXStocks(staticData);
+            setXStocksLoading(false);
+            return;
           }
         }
-        mantleAssets.sort((a, b) => a.symbol.localeCompare(b.symbol));
-        setAllXStocks(mantleAssets);
+      } catch {}
+      // Fallback: fetch from API with pagination
+      try {
+        const allAssets: XStockAsset[] = [];
+        for (let page = 0; page < 5; page++) {
+          const res = await fetch(`https://api.xstocks.fi/api/v2/public/assets?page=${page}`);
+          const data = await res.json();
+          const assets = data.nodes || data;
+          for (const a of assets) {
+            const mantle = (a.deployments || []).find((d: { network: string }) => d.network === "Mantle");
+            if (mantle) {
+              allAssets.push({
+                symbol: a.symbol, name: a.name || a.description || a.symbol,
+                logo: a.logo || "", mantleAddress: mantle.address,
+                networks: (a.deployments || []).map((d: { network: string }) => d.network),
+              });
+            }
+          }
+          if (!data.page?.hasNextPage) break;
+        }
+        allAssets.sort((a, b) => a.symbol.localeCompare(b.symbol));
+        setAllXStocks(allAssets);
       } catch { setAllXStocks([]); }
       setXStocksLoading(false);
     }
