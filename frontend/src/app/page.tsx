@@ -982,6 +982,17 @@ const BASE_TOKENS: SwapToken[] = [
   { symbol: "USDT", address: "0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE", decimals: 6 },
   { symbol: "WETH", address: "0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111", decimals: 18 },
   { symbol: "mETH", address: "0xcDA86A272531e8640cD7F1a92c01839911B90bb0", decimals: 18 },
+  // Wrapped xStocks (Fluxion RWA pools use these addresses)
+  { symbol: "wNVDAx", address: "0x93e62845c1dd5822ebc807ab71a5fb750decd15a", decimals: 18 },
+  { symbol: "wAAPLx", address: "0x5aa7649fdbda47de64a07ac81d64b682af9c0724", decimals: 18 },
+  { symbol: "wGOOGLx", address: "0x1630f08370917e79df0b7572395a5e907508bbbc", decimals: 18 },
+  { symbol: "wTSLAx", address: "0x43680abf18cf54898be84c6ef78237cfbd441883", decimals: 18 },
+  { symbol: "wSPYx", address: "0xc88fcd8b874fdb3256e8b55b3decb8c24eab4c02", decimals: 18 },
+  { symbol: "wQQQx", address: "0xdbd9232fee15351068fe02f0683146e16d9f2cea", decimals: 18 },
+  { symbol: "wMSTRx", address: "0x266e5923f6118f8b340ca5a23ae7f71897361476", decimals: 18 },
+  { symbol: "wMETAx", address: "0x4e41a262caa93c6575d336e0a4eb79f3c67caa06", decimals: 18 },
+  { symbol: "wCRCLx", address: "0xa90872aca656ebe47bdebf3b19ec9dd9c5adc7f8", decimals: 18 },
+  { symbol: "wHOODx", address: "0x953707d7a1cb30cc5c636bda8eaebe410341eb14", decimals: 18 },
 ];
 
 const ERC20_APPROVE_ABI = [{ inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], name: "approve", outputs: [{ type: "bool" }], stateMutability: "nonpayable", type: "function" }] as const;
@@ -1348,8 +1359,9 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
         <div className="grid grid-cols-2 gap-2">
           {[
             { in: "USDC", out: "WMNT" }, { in: "WMNT", out: "USDT" },
-            { in: "USDC", out: "SPYx" }, { in: "USDC", out: "NVDAx" },
-            { in: "USDC", out: "TSLAx" }, { in: "WMNT", out: "USDC" },
+            { in: "USDC", out: "wSPYx" }, { in: "USDC", out: "wNVDAx" },
+            { in: "USDC", out: "wTSLAx" }, { in: "WMNT", out: "USDC" },
+            { in: "USDC", out: "wAAPLx" }, { in: "USDC", out: "wGOOGLx" },
           ].map(pair => {
             const inT = allTokens.find(t => t.symbol === pair.in) || BASE_TOKENS[0];
             const outT = allTokens.find(t => t.symbol === pair.out) || BASE_TOKENS[1];
