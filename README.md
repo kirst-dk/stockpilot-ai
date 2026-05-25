@@ -4,7 +4,7 @@
 
 > Built for [Mantle Turing Test Hackathon 2026](https://dorahacks.io/hackathon/mantleturingtesthackathon2026) — AI × RWA Track
 
-**[Live Demo](https://out-jsgkcxkc.devinapps.com)** | **[DoraHacks BUIDL](https://dorahacks.io/buidl/43884)** | **[Contract on Mantle](https://mantlescan.xyz/address/0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9)**
+**[Live App](https://app.stockpilotai.xyz)** | **[Landing](https://stockpilotai.xyz)** | **[DoraHacks BUIDL](https://dorahacks.io/buidl/43884)** | **[Contract on Mantle](https://mantlescan.xyz/address/0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9)**
 
 ## Overview
 
@@ -12,30 +12,56 @@ StockPilot AI is an autonomous AI agent that manages portfolios of tokenized equ
 
 ### Key Features
 
+- **155+ xStocks Assets** — Full integration with all xStocks tokenized equities on Mantle (dynamic loading, searchable)
 - **AI-Driven Portfolio Management** — Three strategies (Balanced Growth, Momentum, Value Investing) with LLM-enhanced analysis
-- **xStocks Integration** — Direct integration with xStocks tokenized equities on Mantle via xChange Atomic RFQ
-- **Fluxion DEX Integration** — Secondary market trading via [Fluxion Network](https://fluxion.network), Mantle's core spot DEX with AMM V2/V3 liquidity
+- **Fluxion DEX Integration** — On-page swap with 161 tokens, real-time quotes, wallet balance display, native MNT support
+- **Liquidity Pools** — Provide liquidity on Fluxion V3 pools with dual-token deposits via NonfungiblePositionManager
+- **Cross-Chain Bridge** — Relay.link SwapWidget integrated directly on-page (no external redirects)
 - **On-Chain Transparency** — All agent actions (buy/sell/rebalance) recorded on Mantle smart contracts
-- **Real-Time Dashboard** — Beautiful UI showing portfolio, market data, AI recommendations, and trade history
+- **AI Analysis** — Nansen (on-chain analytics) + ELFA AI (market intelligence) + AltLLM (portfolio analysis)
 - **ERC-8004 Agent Identity** — Agent has an on-chain identity NFT per hackathon requirements
 
 ### How It Works
 
 ```
-User selects strategy (Balanced / Momentum / Value)
+User connects wallet (RainbowKit)
            ↓
-AI Agent fetches xStocks prices via API
+Browses 155+ xStocks on Market tab with AI analysis
            ↓
-Strategy engine generates trade recommendations
+Selects strategy (Balanced / Momentum / Value) or builds custom portfolio
            ↓
-AI (GPT-4o-mini) validates and enhances recommendations
+AI Agent analyzes portfolio (risk, diversification, recommendations)
            ↓
-Agent executes trades via xStocks Atomic RFQ on Mantle
+User buys via Swap tab (Fluxion DEX) or bridges assets (Relay.link)
            ↓
-All actions recorded on-chain for transparency
+Dashboard shows positions, pools, and strategy performance
 ```
 
-## Architecture
+## App Architecture — 6 Tabs
+
+| Tab | Description |
+|-----|-------------|
+| **Market** | AI strategies + 155 xStocks with AI info (company/risks) + BUY buttons |
+| **Swap** | Fluxion DEX — 161 tokens, searchable selector, real quotes, wallet balances, native MNT |
+| **Pools** | Fluxion V3 liquidity pools — 12 pools, dual-token deposit, search/filter |
+| **Bridge** | Relay.link SwapWidget — cross-chain bridge to Mantle (on-page, no redirect) |
+| **Dashboard** | Portfolio overview, positions, liquidity, strategy allocation |
+| **Education** | How it works, partners, contracts, xStocks/Fluxion explainer |
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|-----------|
+| Smart Contracts | Solidity 0.8.20, OpenZeppelin, Hardhat |
+| Frontend | Next.js 14, React 18, TypeScript, Tailwind CSS |
+| Wallet | RainbowKit + Wagmi + Viem |
+| DEX | Fluxion Network (Uniswap V3 fork on Mantle) |
+| Bridge | Relay.link (`@reservoir0x/relay-kit-ui` SwapWidget) |
+| AI | Nansen API + ELFA AI + AltLLM |
+| xStocks | 155 tokenized equities (static JSON + API fallback) |
+| Network | Mantle (Chain ID: 5000) |
+
+## Project Structure
 
 ```
 stockpilot-ai/
@@ -46,148 +72,95 @@ stockpilot-ai/
 │   ├── agent/              # AI engine + portfolio agent
 │   ├── strategies/         # Trading strategies (balanced, momentum, value)
 │   ├── xstocks_api/        # xStocks API client
-│   ├── fluxion/            # Fluxion DEX client (secondary market)
+│   ├── fluxion/            # Fluxion DEX client
 │   └── main.py             # FastAPI application
 ├── frontend/               # Next.js dashboard
-│   └── src/app/            # React UI components
-└── scripts/                # Deployment scripts
+│   ├── src/app/
+│   │   ├── page.tsx        # Main app (6 tabs, swap, pools, bridge)
+│   │   ├── providers.tsx   # RainbowKit + Wagmi + Relay providers
+│   │   └── layout.tsx      # HTML layout
+│   └── public/
+│       └── xstocks-data.json # 155 xStocks static data
+└── landing/                # Landing page (stockpilotai.xyz)
 ```
 
-## Tech Stack
+## Smart Contracts
 
-| Component | Technology |
-|-----------|-----------|
-| Smart Contracts | Solidity 0.8.20, OpenZeppelin, Hardhat |
-| Backend | Python 3.11, FastAPI, OpenAI API |
-| Frontend | Next.js 14, React 18, TypeScript |
-| xStocks API | REST API (`api.backed.fi/api/v2`) |
-| Fluxion DEX | AMM V2/V3 on Mantle ([fluxion.network](https://fluxion.network)) |
-| Network | Mantle (Chain ID: 5000) |
-| AI | GPT-4o-mini for analysis enhancement |
+| Contract | Network | Address |
+|----------|---------|---------|
+| StockPilotAgent | Mantle Mainnet | [`0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9`](https://mantlescan.xyz/address/0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9) |
+| Fluxion V3 Factory | Mantle | [`0xF883162Ed9c7E8EF604214c964c678E40c9B737C`](https://mantlescan.xyz/address/0xF883162Ed9c7E8EF604214c964c678E40c9B737C) |
+| Fluxion V3 SwapRouter | Mantle | [`0x5628a59dF0ECAC3f3171f877A94bEb26BA6DFAa0`](https://mantlescan.xyz/address/0x5628a59dF0ECAC3f3171f877A94bEb26BA6DFAa0) |
+| Fluxion PositionManager | Mantle | [`0x2b70C4e7cA8E920435A5dB191e066E9E3AFd8DB3`](https://mantlescan.xyz/address/0x2b70C4e7cA8E920435A5dB191e066E9E3AFd8DB3) |
+
+## Integrations
+
+### xStocks (155 Tokenized Equities)
+- **Data:** Static JSON (`/xstocks-data.json`) + API fallback (`api.xstocks.fi`)
+- **Assets:** SPYx, NVDAx, AAPLx, TSLAx, MSFTx, AMZNx, GOOGLx, METAx + 147 more
+- **Bridge:** 12 bridgeable assets via CCIP (Ethereum, Solana, Arbitrum, Base, etc.)
+- **Docs:** https://docs.xstocks.fi
+
+### Fluxion DEX (Swap & Pools)
+- **Quote API:** `POST https://skillapi.fluxion.network/quote/exact-in`
+- **Swap:** Direct approve + swap through SwapRouter on-page
+- **Pools:** NonfungiblePositionManager for liquidity provision
+- **Tokens:** USDC, WMNT, USDT, WETH, mETH, native MNT + all xStocks
+- **Docs:** https://fluxion-network.gitbook.io/fluxion-network
+
+### Relay.link (Cross-Chain Bridge)
+- **Widget:** `@reservoir0x/relay-kit-ui` SwapWidget embedded on-page
+- **Destination:** Mantle (chainId: 5000)
+- **Sources:** ETH, Arbitrum, Optimism, Base, Polygon, BSC, Avalanche, zkSync
+- **Docs:** https://docs.relay.link
+
+### Squid Router (Legacy)
+- **Integrator ID:** `stockpilot-ai-83f92aed-1e4a-411f-b5fe-809e52b8158f`
+- **API:** https://v2.api.squidrouter.com
+
+### AI & Analytics
+- **Nansen** — On-chain analytics, smart money tracking
+- **ELFA AI** — Market intelligence, sentiment analysis
+- **AltLLM** — Portfolio analysis, risk scoring, recommendations
 
 ## Quick Start
 
 ### Prerequisites
-
 - Node.js 18+
-- Python 3.11+
-- A Mantle wallet with MNT for gas
+- A wallet with MNT for gas (Mantle Network)
 
-### 1. Install Dependencies
+### Install & Run
 
 ```bash
-# Root (smart contracts)
-npm install
-
-# Backend
-cd backend && pip install -r requirements.txt
-
 # Frontend
-cd frontend && npm install
+cd frontend && npm install && npm run dev
+# → http://localhost:3000
+
+# Build for production
+npm run build
+# → outputs to out/ (static export)
 ```
 
-### 2. Configure Environment
+### Deploy
 
 ```bash
-cp .env.example .env
-# Edit .env with your keys
+# Build
+cd frontend && npm run build
+
+# Deploy to server
+scp -r out/* root@YOUR_SERVER:/var/www/app/
 ```
-
-### 3. Compile & Deploy Contracts
-
-```bash
-# Compile
-npm run compile
-
-# Deploy to Mantle Sepolia testnet
-npm run deploy:testnet
-
-# Deploy to Mantle mainnet
-npm run deploy:mainnet
-```
-
-### 4. Start Backend
-
-```bash
-cd backend
-python main.py
-# API available at http://localhost:8000
-```
-
-### 5. Start Frontend
-
-```bash
-cd frontend
-npm run dev
-# Dashboard at http://localhost:3000
-```
-
-## Smart Contract — Mantle Deployment
-
-| Contract | Network | Address |
-|----------|---------|---------|
-| StockPilotAgent | Mantle Sepolia | [`0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9`](https://sepolia.mantlescan.xyz/address/0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9) |
-| StockPilotAgent | Mantle Mainnet | [`0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9`](https://mantlescan.xyz/address/0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9) |
-
-## xStocks Integration
-
-StockPilot AI integrates with [xStocks](https://xstocks.fi) tokenized equities on Mantle:
-
-- **Price Feeds**: Real-time prices from xStocks API (`/public/assets/{symbol}/price-data`)
-- **Asset Data**: Token metadata, multipliers, and contract addresses
-- **Atomic RFQ (xChange)**: Mint/redeem xStocks at live market prices via xStocks' atomic settlement
-- **Supported Assets**: SPYx, NVDAx, AAPLx, TSLAx, MSFTx, AMZNx
-
-## Fluxion DEX Integration
-
-StockPilot AI integrates with [Fluxion Network](https://fluxion.network) — Mantle's core spot DEX — for secondary market trading of xStocks:
-
-- **Smart Routing**: Compares V2 and V3 pools to find optimal execution price
-- **Pool Discovery**: Scans all fee tiers (0.01%, 0.05%, 0.3%, 1%) for available liquidity
-- **Price Quoting**: Real-time quotes via QuoterV2 (V3) and Router (V2)
-- **Liquidity Analysis**: Checks xStock/stablecoin pool availability across all tiers
-
-### Fluxion Contracts on Mantle
-
-| Contract | Address |
-|----------|----------|
-| V2 Router | [`0xd772E655af24Fe5Af92504D613D1Da0d9cFb6408`](https://mantlescan.xyz/address/0xd772E655af24Fe5Af92504D613D1Da0d9cFb6408) |
-| V3 SwapRouter | [`0x5628a59dF0ECAC3f3171f877A94bEb26BA6DFAa0`](https://mantlescan.xyz/address/0x5628a59dF0ECAC3f3171f877A94bEb26BA6DFAa0) |
-| V3 QuoterV2 | [`0x3E4eE18Ac7280813236a1EB850679Da5322E14CE`](https://mantlescan.xyz/address/0x3E4eE18Ac7280813236a1EB850679Da5322E14CE) |
-| V3 Factory | [`0xF883162Ed9c7E8EF604214c964c678E40c9B737C`](https://mantlescan.xyz/address/0xF883162Ed9c7E8EF604214c964c678E40c9B737C) |
-
-## API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/health` | GET | Health check |
-| `/api/market` | GET | Current xStocks market data |
-| `/api/assets` | GET | All available xStocks assets |
-| `/api/portfolio` | GET | Current portfolio state |
-| `/api/analyze` | GET | Run AI analysis, get recommendations |
-| `/api/execute` | POST | Execute trade recommendations |
-| `/api/strategy` | POST | Change trading strategy |
-| `/api/strategies` | GET | List available strategies |
-| `/api/history` | GET | Trade execution history |
-| `/api/market-fees` | GET | xStocks fee schedule (issuance/redemption/xChange) |
-| `/api/assets/{symbol}/quote` | GET | Real-time Atomic RFQ quote via xChange |
-| `/api/assets/{symbol}/multiplier` | GET | Asset multiplier (dividends/splits) |
-| `/api/proof-of-reserves` | GET | Proof of reserves for all xStocks |
-| `/api/fluxion/contracts` | GET | Fluxion DEX contract addresses |
-| `/api/fluxion/pool` | GET | Find best liquidity pool for token pair |
-| `/api/fluxion/quote` | GET | Get best swap quote (V2 vs V3) |
-| `/api/fluxion/liquidity/{address}` | GET | Check xStock liquidity on Fluxion |
 
 ## Trading Strategies
 
 ### Balanced Growth (Risk: 5/10)
-Conservative diversified approach with stop-loss (10%) and take-profit (20%) mechanisms. Periodic rebalancing to target weights.
+Conservative diversified approach with stop-loss (10%) and take-profit (20%) mechanisms.
 
 ### Momentum (Risk: 6/10)
-Follows price trends — increases allocation to assets with strong upward momentum, reduces exposure to underperformers.
+Follows price trends — increases allocation to assets with strong upward momentum.
 
 ### Value Investing (Risk: 4/10)
-Mean reversion strategy — buys on significant pullbacks, trims on extended rallies. Heavier allocation to stable, cash-rich companies.
+Mean reversion strategy — buys on significant pullbacks, trims on extended rallies.
 
 ## Hackathon Tracks
 
@@ -196,14 +169,17 @@ Mean reversion strategy — buys on significant pullbacks, trims on extended ral
 
 ## Ecosystem Partners
 
-- [xStocks](https://xstocks.fi) — Tokenized equities (1:1 backed by real stocks)
-- [Fluxion Network](https://fluxion.network) — Core spot DEX on Mantle (AMM V2/V3)
-- [Mantle Network](https://mantle.xyz) — EVM-compatible L2 with native xStocks support
+| Partner | Role |
+|---------|------|
+| [Mantle Network](https://mantle.xyz) | L2 Network |
+| [Fluxion Network](https://fluxion.network) | Core spot DEX (Uniswap V3 fork) |
+| [xStocks](https://xstocks.fi) | Tokenized equities (155 assets) |
+| [Relay.link](https://relay.link) | Cross-chain bridge |
+| [Nansen](https://nansen.ai) | On-chain analytics |
+| [ELFA AI](https://elfa.ai) | Market intelligence |
+| [AltLLM](https://altlayer.io) | AI analysis |
+| [RainbowKit](https://rainbowkit.com) | Wallet connection |
 
 ## License
 
 MIT
-
-## Team
-
-Built with AI assistance for [Mantle Turing Test Hackathon 2026](https://dorahacks.io/hackathon/mantleturingtesthackathon2026)
