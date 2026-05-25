@@ -965,7 +965,7 @@ function MarketTab({
 
 
 /* ========== SWAP TAB ========== */
-const FLUXION_QUOTE_API = "https://skillapi.fluxion.network/quote/exact-in";
+const FLUXION_QUOTE_API = "/api/fluxion/quote/exact-in";
 const FLUXION_ROUTER = "0x5628a59dF0ECAC3f3171f877A94bEb26BA6DFAa0";
 const FLUXION_FACTORY = "0xF883162Ed9c7E8EF604214c964c678E40c9B737C";
 const USDC_MANTLE = "0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9";
