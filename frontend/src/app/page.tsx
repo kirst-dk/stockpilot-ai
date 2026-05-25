@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useBalance, useWalletClient, usePublicClient } from "wagmi";
-import { formatEther } from "viem";
+import { formatEther, encodeFunctionData } from "viem";
 import dynamic from "next/dynamic";
 
 const RelaySwapWidget = dynamic(
@@ -987,6 +987,10 @@ const BASE_TOKENS: SwapToken[] = [
 const ERC20_APPROVE_ABI = [{ inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], name: "approve", outputs: [{ type: "bool" }], stateMutability: "nonpayable", type: "function" }] as const;
 const ERC20_BALANCE_ABI = [{ inputs: [{ name: "account", type: "address" }], name: "balanceOf", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" }] as const;
 
+const FACTORY_GET_POOL_ABI = [{ inputs: [{ name: "tokenA", type: "address" }, { name: "tokenB", type: "address" }, { name: "fee", type: "uint24" }], name: "getPool", outputs: [{ name: "", type: "address" }], stateMutability: "view", type: "function" }] as const;
+const POOL_SLOT0_ABI = [{ inputs: [], name: "slot0", outputs: [{ name: "sqrtPriceX96", type: "uint160" }, { name: "tick", type: "int24" }, { name: "observationIndex", type: "uint16" }, { name: "observationCardinality", type: "uint16" }, { name: "observationCardinalityNext", type: "uint16" }, { name: "feeProtocol", type: "uint8" }, { name: "unlocked", type: "bool" }], stateMutability: "view", type: "function" }] as const;
+const SWAP_ROUTER_ABI = [{ inputs: [{ components: [{ name: "tokenIn", type: "address" }, { name: "tokenOut", type: "address" }, { name: "fee", type: "uint24" }, { name: "recipient", type: "address" }, { name: "deadline", type: "uint256" }, { name: "amountIn", type: "uint256" }, { name: "amountOutMinimum", type: "uint256" }, { name: "sqrtPriceLimitX96", type: "uint160" }], name: "params", type: "tuple" }], name: "exactInputSingle", outputs: [{ name: "amountOut", type: "uint256" }], stateMutability: "payable", type: "function" }] as const;
+
 function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient }: { walletClient: any; isConnected: boolean; address: string | undefined; allXStocks: XStockAsset[]; publicClient: any }) {
   const [inputAmount, setInputAmount] = useState("");
   const [outputAmount, setOutputAmount] = useState("");
@@ -1035,10 +1039,59 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
     fetchBal(outputToken, setOutputBalance);
   }, [address, inputToken, outputToken, publicClient]);
 
+  // Direct on-chain quote fallback for pools not indexed by Fluxion Quote API
+  const getDirectOnChainQuote = useCallback(async (
+    inToken: SwapToken, outToken: SwapToken, rawAmountBigInt: bigint, userAddr: string
+  ) => {
+    if (!publicClient) return null;
+    const inputAddr = inToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : inToken.address;
+    const outputAddr = outToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : outToken.address;
+    const feeTiers = [3000, 500, 10000];
+    for (const fee of feeTiers) {
+      try {
+        const poolAddress = await publicClient.readContract({
+          address: FLUXION_FACTORY as `0x${string}`, abi: FACTORY_GET_POOL_ABI, functionName: "getPool",
+          args: [inputAddr as `0x${string}`, outputAddr as `0x${string}`, fee],
+        });
+        if (!poolAddress || poolAddress === "0x0000000000000000000000000000000000000000") continue;
+        const slot0 = await publicClient.readContract({
+          address: poolAddress as `0x${string}`, abi: POOL_SLOT0_ABI, functionName: "slot0",
+        });
+        const sqrtPriceX96 = slot0[0] as bigint;
+        if (sqrtPriceX96 === BigInt(0)) continue;
+        const token0Addr = inputAddr.toLowerCase() < outputAddr.toLowerCase() ? inputAddr.toLowerCase() : outputAddr.toLowerCase();
+        const isToken0Input = inputAddr.toLowerCase() === token0Addr;
+        const Q192 = BigInt("6277101735386680763835789423207666416102355444464034512896");
+        let outAmount: bigint;
+        if (isToken0Input) {
+          outAmount = rawAmountBigInt * sqrtPriceX96 * sqrtPriceX96 / Q192;
+        } else {
+          outAmount = rawAmountBigInt * Q192 / (sqrtPriceX96 * sqrtPriceX96);
+        }
+        if (outAmount <= BigInt(0)) continue;
+        const minOutAmount = outAmount * BigInt(99) / BigInt(100);
+        const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800);
+        const swapCalldata = encodeFunctionData({
+          abi: SWAP_ROUTER_ABI, functionName: "exactInputSingle",
+          args: [{ tokenIn: inputAddr as `0x${string}`, tokenOut: outputAddr as `0x${string}`, fee, recipient: userAddr as `0x${string}`, deadline, amountIn: rawAmountBigInt, amountOutMinimum: minOutAmount, sqrtPriceLimitX96: BigInt(0) }],
+        });
+        const txValue = inToken.address === NATIVE_MNT_ADDRESS ? rawAmountBigInt.toString() : "0";
+        return {
+          outAmount: outAmount.toString(), minOutAmount: minOutAmount.toString(),
+          priceImpact: "< 0.5", route: `Direct V3 Pool (${(fee / 10000).toFixed(2)}%)`,
+          directSwap: true,
+          tx: { to: FLUXION_ROUTER, data: swapCalldata, value: txValue },
+        };
+      } catch { continue; }
+    }
+    return null;
+  }, [publicClient]);
+
   const fetchQuote = useCallback(async (amount: string) => {
     if (!amount || parseFloat(amount) <= 0) { setOutputAmount(""); setQuoteData(null); return; }
     if (!inputToken || !outputToken) return;
-    const rawAmount = BigInt(Math.floor(parseFloat(amount) * (10 ** inputToken.decimals))).toString();
+    const rawAmountBigInt = BigInt(Math.floor(parseFloat(amount) * (10 ** inputToken.decimals)));
+    const rawAmount = rawAmountBigInt.toString();
     // For native MNT swaps, use WMNT address in the quote (router wraps automatically)
     const inputMint = inputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : inputToken.address;
     const outputMint = outputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : outputToken.address;
@@ -1053,10 +1106,30 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
         const out = parseFloat(data.outAmount) / (10 ** outputToken.decimals);
         setOutputAmount(out.toFixed(6));
         setQuoteData(data);
-      } else { setOutputAmount(""); setQuoteData(data.error ? { error: data.error } : null); }
-    } catch { setOutputAmount(""); setQuoteData(null); }
+      } else {
+        // API doesn't know this pool — try direct on-chain quote
+        const direct = await getDirectOnChainQuote(inputToken, outputToken, rawAmountBigInt, address || "0x0000000000000000000000000000000000000001");
+        if (direct) {
+          const out = parseFloat(direct.outAmount) / (10 ** outputToken.decimals);
+          setOutputAmount(out.toFixed(6));
+          setQuoteData(direct);
+        } else {
+          setOutputAmount(""); setQuoteData(data.error ? { error: data.error } : null);
+        }
+      }
+    } catch {
+      // Network error — try direct on-chain quote
+      const direct = await getDirectOnChainQuote(inputToken, outputToken, rawAmountBigInt, address || "0x0000000000000000000000000000000000000001");
+      if (direct) {
+        const out = parseFloat(direct.outAmount) / (10 ** outputToken.decimals);
+        setOutputAmount(out.toFixed(6));
+        setQuoteData(direct);
+      } else {
+        setOutputAmount(""); setQuoteData(null);
+      }
+    }
     setQuoting(false);
-  }, [inputToken, outputToken, address]);
+  }, [inputToken, outputToken, address, getDirectOnChainQuote]);
 
   useEffect(() => {
     const timer = setTimeout(() => { if (inputAmount) fetchQuote(inputAmount); }, 500);
