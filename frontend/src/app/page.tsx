@@ -1386,7 +1386,7 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
     if (!show) return null;
     const otherToken = side === "input" ? outputToken : inputToken;
     return (
-      <div className="absolute right-0 top-full mt-1 z-50 w-72 bg-[#0d1220] border border-white/10 rounded-xl overflow-hidden shadow-2xl">
+      <div className={`absolute right-0 z-50 w-72 bg-[#0d1220] border border-white/10 rounded-xl overflow-hidden shadow-2xl ${side === "output" ? "bottom-full mb-1" : "top-full mt-1"}`}>
         <div className="p-3 border-b border-white/5">
           <input type="text" placeholder="Search token or paste address..." value={tokenSearch} onChange={e => setTokenSearch(e.target.value)}
             className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-xs text-white/80 placeholder:text-white/30 focus:outline-none focus:border-blue-500/30" autoFocus />
@@ -1449,7 +1449,7 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
                 <div className="relative">
                   <button onClick={() => { setShowInputSelect(!showInputSelect); setShowOutputSelect(false); setTokenSearch(""); }}
                     className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-sm font-semibold text-white/70 flex items-center gap-1.5 hover:bg-white/10 transition-all">
-                    <div className="w-5 h-5 rounded-full bg-blue-500/20 flex items-center justify-center text-[8px] font-bold text-blue-400">{inputToken.symbol[0]}</div>
+                    {inputToken.logo ? <img src={inputToken.logo} className="w-5 h-5 rounded-full bg-white/5" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-5 h-5 rounded-full bg-blue-500/20 flex items-center justify-center text-[8px] font-bold text-blue-400">{inputToken.symbol[0]}</div>}
                     {inputToken.symbol.length > 8 ? inputToken.symbol.slice(0, 8) + ".." : inputToken.symbol}
                     <svg width="8" height="8" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
                   </button>
@@ -1477,7 +1477,7 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
                 <div className="relative">
                   <button onClick={() => { setShowOutputSelect(!showOutputSelect); setShowInputSelect(false); setTokenSearch(""); }}
                     className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-sm font-semibold text-white/70 flex items-center gap-1.5 hover:bg-white/10 transition-all">
-                    <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center text-[8px] font-bold text-emerald-400">{outputToken.symbol[0]}</div>
+                    {outputToken.logo ? <img src={outputToken.logo} className="w-5 h-5 rounded-full bg-white/5" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center text-[8px] font-bold text-emerald-400">{outputToken.symbol[0]}</div>}
                     {outputToken.symbol.length > 8 ? outputToken.symbol.slice(0, 8) + ".." : outputToken.symbol}
                     <svg width="8" height="8" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
                   </button>
@@ -1551,28 +1551,7 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
         </div>
       </div>
 
-      {/* Popular pairs */}
-      <div className="mt-6">
-        <h3 className="text-xs font-semibold text-white/50 mb-3">Popular Pairs</h3>
-        <div className="grid grid-cols-2 gap-2">
-          {[
-            { in: "USDC", out: "WMNT" }, { in: "WMNT", out: "USDT" },
-            { in: "USDC", out: "wSPYx" }, { in: "USDC", out: "wNVDAx" },
-            { in: "USDC", out: "wTSLAx" }, { in: "WMNT", out: "USDC" },
-            { in: "USDC", out: "wAAPLx" }, { in: "USDC", out: "wGOOGLx" },
-          ].map(pair => {
-            const inT = allTokens.find(t => t.symbol === pair.in) || BASE_TOKENS[0];
-            const outT = allTokens.find(t => t.symbol === pair.out) || BASE_TOKENS[1];
-            return (
-              <button key={pair.in + pair.out} onClick={() => { setInputToken(inT); setOutputToken(outT); setInputAmount(""); setOutputAmount(""); setQuoteData(null); }}
-                className="p-3 rounded-xl border border-white/5 bg-white/[0.015] hover:border-white/10 hover:bg-white/[0.03] transition-all flex items-center justify-between">
-                <span className="text-xs font-medium text-white/70">{pair.in} → {pair.out}</span>
-                <span className="text-[9px] text-white/30">V3</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+
     </div>
   );
 }
