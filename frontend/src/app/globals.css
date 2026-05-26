@@ -106,6 +106,26 @@ html {
   color: #f1f5f9;
 }
 
+/* Relay Kit modal/dialog centering */
+[data-radix-dialog-overlay],
+[data-radix-popper-content-wrapper] {
+  z-index: 9999 !important;
+}
+[data-radix-dialog-overlay] {
+  position: fixed !important;
+  inset: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+[data-radix-dialog-content] {
+  position: relative !important;
+  margin: auto !important;
+  left: auto !important;
+  top: auto !important;
+  transform: none !important;
+}
+
 /* Ticker scroll animation */
 @keyframes scroll {
   0% { transform: translateX(0); }
