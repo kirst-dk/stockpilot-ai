@@ -62,8 +62,8 @@ html {
   max-width: 100% !important;
 }
 
-/* Relay dark theme overrides */
-.relay-widget-container .relay-kit-reset {
+/* Relay dark theme overrides — applied globally for portals/modals */
+.relay-kit-reset {
   --relay-colors-gray-1: #0d1220 !important;
   --relay-colors-gray-2: #111827 !important;
   --relay-colors-gray-3: #1e293b !important;
@@ -76,14 +76,34 @@ html {
   --relay-colors-gray-10: #cbd5e1 !important;
   --relay-colors-gray-11: #e2e8f0 !important;
   --relay-colors-gray-12: #f1f5f9 !important;
+  --relay-colors-gray1: #0d1220 !important;
+  --relay-colors-gray2: #111827 !important;
+  --relay-colors-gray3: #1e293b !important;
+  --relay-colors-gray6: #475569 !important;
+  --relay-colors-slate-1: #0d1220 !important;
+  --relay-colors-slate-2: #111827 !important;
+  --relay-colors-slate-3: #1e293b !important;
+  --relay-colors-slate-4: #283548 !important;
+  --relay-colors-slate-5: #334155 !important;
+  --relay-colors-slate-6: #475569 !important;
+  --relay-colors-slate-7: #64748b !important;
+  --relay-colors-slate-8: #94a3b8 !important;
+  --relay-colors-slate-9: #94a3b8 !important;
+  --relay-colors-slate-10: #cbd5e1 !important;
+  --relay-colors-slate-11: #e2e8f0 !important;
+  --relay-colors-slate-12: #f1f5f9 !important;
   --relay-colors-widget-background: #0d1220 !important;
   --relay-colors-modal-background: #0f172a !important;
+  --relay-colors-subtle-background-color: #111827 !important;
+  --relay-colors-input-background: rgba(255,255,255,0.05) !important;
+  --relay-colors-dropdown-background: #111827 !important;
+  --relay-colors-skeleton-background: rgba(255,255,255,0.06) !important;
+  --relay-colors-widget-card-background: rgba(255,255,255,0.03) !important;
+  --relay-colors-widget-selector-background: rgba(255,255,255,0.04) !important;
+  --relay-colors-widget-selector-hover-background: rgba(255,255,255,0.08) !important;
+  --relay-colors-text-default: #f1f5f9 !important;
+  --relay-colors-text-subtle: #94a3b8 !important;
   color: #f1f5f9;
-}
-
-/* Ensure proper text contrast inside widget */
-.relay-widget-container [class*="relay-"] {
-  color: inherit;
 }
 
 /* Ticker scroll animation */

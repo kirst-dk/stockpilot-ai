@@ -1776,7 +1776,7 @@ function BridgeTab({ walletClient, onConnectWallet }: { walletClient: any; onCon
   }, [walletClient]);
 
   return (
-    <div className="max-w-2xl mx-auto">
+    <div className="max-w-lg mx-auto px-4">
       <div className="text-center mb-6">
         <h2 className="text-xl font-bold mb-1">Bridge</h2>
         <p className="text-xs text-white/40">Cross-chain transfers powered by Relay</p>
