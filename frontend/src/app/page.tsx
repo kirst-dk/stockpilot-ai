@@ -968,6 +968,7 @@ function MarketTab({
 const FLUXION_QUOTE_API = "/api/fluxion/quote/exact-in";
 const FLUXION_ROUTER = "0x5628a59dF0ECAC3f3171f877A94bEb26BA6DFAa0";
 const FLUXION_FACTORY = "0xF883162Ed9c7E8EF604214c964c678E40c9B737C";
+const XSTOCK_SWAP_HELPER = "0x0000000000000000000000000000000000000000"; // TODO: deploy and set
 const USDC_MANTLE = "0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9";
 const WMNT_ADDRESS = "0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8";
 
@@ -1061,9 +1062,9 @@ const isXStock = (addr: string) => !!UNWRAPPED_TO_WRAPPED[addr.toLowerCase()];
 const ERC20_APPROVE_ABI = [{ inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], name: "approve", outputs: [{ type: "bool" }], stateMutability: "nonpayable", type: "function" }] as const;
 const ERC20_ALLOWANCE_ABI = [{ inputs: [{ name: "owner", type: "address" }, { name: "spender", type: "address" }], name: "allowance", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" }] as const;
 const ERC20_BALANCE_ABI = [{ inputs: [{ name: "account", type: "address" }], name: "balanceOf", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" }] as const;
-// ERC-4626 vault ABI for wrapping/unwrapping xStocks
-const ERC4626_DEPOSIT_ABI = [{ inputs: [{ name: "assets", type: "uint256" }, { name: "receiver", type: "address" }], name: "deposit", outputs: [{ name: "shares", type: "uint256" }], stateMutability: "nonpayable", type: "function" }] as const;
-const ERC4626_REDEEM_ABI = [{ inputs: [{ name: "shares", type: "uint256" }, { name: "receiver", type: "address" }, { name: "owner", type: "address" }], name: "redeem", outputs: [{ name: "assets", type: "uint256" }], stateMutability: "nonpayable", type: "function" }] as const;
+// SwapHelper ABI — single-tx wrap+swap or swap+unwrap for xStocks
+const SWAP_HELPER_WRAP_AND_SWAP_ABI = [{ inputs: [{ name: "xstock", type: "address" }, { name: "wrapper", type: "address" }, { name: "tokenOut", type: "address" }, { name: "amountIn", type: "uint256" }, { name: "fee", type: "uint24" }, { name: "amountOutMin", type: "uint256" }, { name: "deadline", type: "uint256" }], name: "wrapAndSwap", outputs: [{ name: "amountOut", type: "uint256" }], stateMutability: "nonpayable", type: "function" }] as const;
+const SWAP_HELPER_SWAP_AND_UNWRAP_ABI = [{ inputs: [{ name: "tokenIn", type: "address" }, { name: "wrapper", type: "address" }, { name: "amountIn", type: "uint256" }, { name: "fee", type: "uint24" }, { name: "amountOutMin", type: "uint256" }, { name: "deadline", type: "uint256" }], name: "swapAndUnwrap", outputs: [{ name: "assets", type: "uint256" }], stateMutability: "nonpayable", type: "function" }] as const;
 const MAX_UINT256 = BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
 
 const FACTORY_GET_POOL_ABI = [{ inputs: [{ name: "tokenA", type: "address" }, { name: "tokenB", type: "address" }, { name: "fee", type: "uint24" }], name: "getPool", outputs: [{ name: "", type: "address" }], stateMutability: "view", type: "function" }] as const;
@@ -1222,6 +1223,21 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
     return () => clearTimeout(timer);
   }, [inputAmount, fetchQuote]);
 
+  // Find which fee tier a Fluxion pool uses for a given pair (wrapped addresses)
+  const findPoolFee = useCallback(async (tokenA: string, tokenB: string): Promise<number> => {
+    if (!publicClient) return 3000;
+    for (const fee of [3000, 500, 10000]) {
+      try {
+        const pool = await publicClient.readContract({
+          address: FLUXION_FACTORY as `0x${string}`, abi: FACTORY_GET_POOL_ABI, functionName: "getPool",
+          args: [tokenA as `0x${string}`, tokenB as `0x${string}`, fee],
+        }) as string;
+        if (pool && pool !== "0x0000000000000000000000000000000000000000") return fee;
+      } catch { continue; }
+    }
+    return 3000;
+  }, [publicClient]);
+
   const executeSwap = async () => {
     if (!walletClient || !quoteData?.tx || !address || !publicClient) return;
     setSwapping(true); setSwapStatus(null);
@@ -1231,84 +1247,103 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
       const rawAmount = (inputBalanceRaw !== null && calcRaw >= inputBalanceRaw) ? inputBalanceRaw : calcRaw;
       const inputIsXStock = isXStock(inputToken.address);
       const outputIsXStock = isXStock(outputToken.address);
-      const wrappedInputAddr = resolveWrapped(inputToken.address) as `0x${string}`;
+      const helperAddr = XSTOCK_SWAP_HELPER as `0x${string}`;
+      const useHelper = helperAddr !== "0x0000000000000000000000000000000000000000" && (inputIsXStock || outputIsXStock);
 
-      // Step 1: If selling an xStock, wrap it first (original → wrapped via ERC-4626 deposit)
-      if (inputIsXStock) {
-        // Approve original xStock for the wrapper contract
-        const wrapperAllowance = await publicClient.readContract({
+      if (useHelper && inputIsXStock) {
+        // SELLING xStock → token: single-tx via SwapHelper.wrapAndSwap()
+        const wrappedAddr = resolveWrapped(inputToken.address) as `0x${string}`;
+        const outputAddr = outputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS as `0x${string}` : resolveWrapped(outputToken.address) as `0x${string}`;
+        // Approve original xStock for the helper (one-time)
+        const allowance = await publicClient.readContract({
           address: inputToken.address as `0x${string}`, abi: ERC20_ALLOWANCE_ABI,
-          functionName: "allowance", args: [address as `0x${string}`, wrappedInputAddr],
+          functionName: "allowance", args: [address as `0x${string}`, helperAddr],
         }) as bigint;
-        if (wrapperAllowance < rawAmount) {
-          setSwapStatus("Approving xStock for wrapping...");
-          const approveHash = await walletClient.writeContract({
+        if (allowance < rawAmount) {
+          setSwapStatus("Approving token...");
+          const ah = await walletClient.writeContract({
             address: inputToken.address as `0x${string}`, abi: ERC20_APPROVE_ABI,
-            functionName: "approve", args: [wrappedInputAddr, MAX_UINT256],
+            functionName: "approve", args: [helperAddr, MAX_UINT256],
           });
-          await publicClient.waitForTransactionReceipt({ hash: approveHash, confirmations: 1 });
+          await publicClient.waitForTransactionReceipt({ hash: ah, confirmations: 1 });
         }
-        setSwapStatus("Wrapping xStock...");
-        const depositHash = await walletClient.writeContract({
-          address: wrappedInputAddr, abi: ERC4626_DEPOSIT_ABI,
-          functionName: "deposit", args: [rawAmount, address as `0x${string}`],
+        const fee = await findPoolFee(wrappedAddr, outputAddr);
+        const minOut = quoteData.outAmount ? BigInt(quoteData.outAmount) * BigInt(99) / BigInt(100) : BigInt(0);
+        const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800);
+        setSwapStatus("Wrapping & swapping...");
+        const tx = await walletClient.writeContract({
+          address: helperAddr, abi: SWAP_HELPER_WRAP_AND_SWAP_ABI,
+          functionName: "wrapAndSwap",
+          args: [inputToken.address as `0x${string}`, wrappedAddr, outputAddr, rawAmount, fee, minOut, deadline],
         });
-        await publicClient.waitForTransactionReceipt({ hash: depositHash, confirmations: 1 });
-      }
-
-      // Step 2: Approve the token the router will pull (wrapped for xStocks, original for others)
-      const routerTokenAddr = inputIsXStock ? wrappedInputAddr : inputToken.address as `0x${string}`;
-      if (inputToken.address !== NATIVE_MNT_ADDRESS) {
-        const currentAllowance = await publicClient.readContract({
-          address: routerTokenAddr, abi: ERC20_ALLOWANCE_ABI,
-          functionName: "allowance", args: [address as `0x${string}`, FLUXION_ROUTER as `0x${string}`],
-        }) as bigint;
-        if (currentAllowance < rawAmount) {
-          setSwapStatus("Approving token for swap...");
-          const approveHash = await walletClient.writeContract({
-            address: routerTokenAddr, abi: ERC20_APPROVE_ABI,
-            functionName: "approve", args: [FLUXION_ROUTER as `0x${string}`, MAX_UINT256],
-          });
-          await publicClient.waitForTransactionReceipt({ hash: approveHash, confirmations: 1 });
+        setSwapStatus("Waiting for confirmation...");
+        await publicClient.waitForTransactionReceipt({ hash: tx, confirmations: 1 });
+        setSwapStatus(`Swap successful! Tx: ${tx.slice(0, 10)}...`);
+      } else if (useHelper && outputIsXStock) {
+        // BUYING xStock: single-tx via SwapHelper.swapAndUnwrap()
+        const wrappedAddr = resolveWrapped(outputToken.address) as `0x${string}`;
+        const inputAddr = inputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS as `0x${string}` : inputToken.address as `0x${string}`;
+        // Approve input token for the helper
+        if (inputToken.address !== NATIVE_MNT_ADDRESS) {
+          const allowance = await publicClient.readContract({
+            address: inputAddr, abi: ERC20_ALLOWANCE_ABI,
+            functionName: "allowance", args: [address as `0x${string}`, helperAddr],
+          }) as bigint;
+          if (allowance < rawAmount) {
+            setSwapStatus("Approving token...");
+            const ah = await walletClient.writeContract({
+              address: inputAddr, abi: ERC20_APPROVE_ABI,
+              functionName: "approve", args: [helperAddr, MAX_UINT256],
+            });
+            await publicClient.waitForTransactionReceipt({ hash: ah, confirmations: 1 });
+          }
         }
-      }
-
-      // Step 3: Execute the swap (always uses wrapped addresses via resolveWrapped)
-      const inputMint = inputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : resolveWrapped(inputToken.address);
-      const outputMint = outputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : resolveWrapped(outputToken.address);
-      let freshTx = quoteData.tx;
-      try {
-        const res = await fetch(FLUXION_QUOTE_API, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ inputMint, outputMint, amount: rawAmount.toString(), userPublicKey: address, dynamicSlippage: false, slippageBps: "100" }),
+        const fee = await findPoolFee(inputAddr, wrappedAddr);
+        const minOut = quoteData.outAmount ? BigInt(quoteData.outAmount) * BigInt(99) / BigInt(100) : BigInt(0);
+        const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800);
+        setSwapStatus("Swapping & unwrapping...");
+        const tx = await walletClient.writeContract({
+          address: helperAddr, abi: SWAP_HELPER_SWAP_AND_UNWRAP_ABI,
+          functionName: "swapAndUnwrap",
+          args: [inputAddr, wrappedAddr, rawAmount, fee, minOut, deadline],
         });
-        const freshData = await res.json();
-        if (freshData.tx) { freshTx = freshData.tx; }
-      } catch { /* use cached quote tx data */ }
-      setSwapStatus("Executing swap...");
-      const value = inputToken.address === NATIVE_MNT_ADDRESS ? rawAmount.toString() : (freshTx.value || "0");
-      const tx = await walletClient.sendTransaction({ to: freshTx.to as `0x${string}`, data: freshTx.data as `0x${string}`, value: BigInt(value) });
-      setSwapStatus("Waiting for confirmation...");
-      await publicClient.waitForTransactionReceipt({ hash: tx, confirmations: 1 });
-
-      // Step 4: If buying an xStock, unwrap it (wrapped → original via ERC-4626 redeem)
-      if (outputIsXStock) {
-        const wrappedOutputAddr = resolveWrapped(outputToken.address) as `0x${string}`;
-        const wrappedBal = await publicClient.readContract({
-          address: wrappedOutputAddr, abi: ERC20_BALANCE_ABI,
-          functionName: "balanceOf", args: [address as `0x${string}`],
-        }) as bigint;
-        if (wrappedBal > BigInt(0)) {
-          setSwapStatus("Unwrapping to original xStock...");
-          const redeemHash = await walletClient.writeContract({
-            address: wrappedOutputAddr, abi: ERC4626_REDEEM_ABI,
-            functionName: "redeem", args: [wrappedBal, address as `0x${string}`, address as `0x${string}`],
-          });
-          await publicClient.waitForTransactionReceipt({ hash: redeemHash, confirmations: 1 });
+        setSwapStatus("Waiting for confirmation...");
+        await publicClient.waitForTransactionReceipt({ hash: tx, confirmations: 1 });
+        setSwapStatus(`Swap successful! Tx: ${tx.slice(0, 10)}...`);
+      } else {
+        // Non-xStock swap: use Fluxion Quote API tx directly
+        if (inputToken.address !== NATIVE_MNT_ADDRESS) {
+          const currentAllowance = await publicClient.readContract({
+            address: inputToken.address as `0x${string}`, abi: ERC20_ALLOWANCE_ABI,
+            functionName: "allowance", args: [address as `0x${string}`, FLUXION_ROUTER as `0x${string}`],
+          }) as bigint;
+          if (currentAllowance < rawAmount) {
+            setSwapStatus("Approving token...");
+            const approveHash = await walletClient.writeContract({
+              address: inputToken.address as `0x${string}`, abi: ERC20_APPROVE_ABI,
+              functionName: "approve", args: [FLUXION_ROUTER as `0x${string}`, MAX_UINT256],
+            });
+            await publicClient.waitForTransactionReceipt({ hash: approveHash, confirmations: 1 });
+          }
         }
+        const inputMint = inputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : resolveWrapped(inputToken.address);
+        const outputMint = outputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : resolveWrapped(outputToken.address);
+        let freshTx = quoteData.tx;
+        try {
+          const res = await fetch(FLUXION_QUOTE_API, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ inputMint, outputMint, amount: rawAmount.toString(), userPublicKey: address, dynamicSlippage: false, slippageBps: "100" }),
+          });
+          const freshData = await res.json();
+          if (freshData.tx) { freshTx = freshData.tx; }
+        } catch { /* use cached quote tx data */ }
+        setSwapStatus("Executing swap...");
+        const value = inputToken.address === NATIVE_MNT_ADDRESS ? rawAmount.toString() : (freshTx.value || "0");
+        const tx = await walletClient.sendTransaction({ to: freshTx.to as `0x${string}`, data: freshTx.data as `0x${string}`, value: BigInt(value) });
+        setSwapStatus("Waiting for confirmation...");
+        await publicClient.waitForTransactionReceipt({ hash: tx, confirmations: 1 });
+        setSwapStatus(`Swap successful! Tx: ${tx.slice(0, 10)}...`);
       }
-
-      setSwapStatus(`Swap successful! Tx: ${tx.slice(0, 10)}...`);
       setInputAmount(""); setOutputAmount(""); setQuoteData(null);
     } catch (err: any) { setSwapStatus(`Error: ${err.shortMessage || err.message || "Transaction failed"}`); }
     setSwapping(false);
