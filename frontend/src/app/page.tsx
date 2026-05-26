@@ -982,18 +982,34 @@ const BASE_TOKENS: SwapToken[] = [
   { symbol: "USDT", address: "0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE", decimals: 6 },
   { symbol: "WETH", address: "0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111", decimals: 18 },
   { symbol: "mETH", address: "0xcDA86A272531e8640cD7F1a92c01839911B90bb0", decimals: 18 },
-  // Wrapped xStocks (Fluxion RWA pools use these addresses)
-  { symbol: "wNVDAx", address: "0x93e62845c1dd5822ebc807ab71a5fb750decd15a", decimals: 18 },
-  { symbol: "wAAPLx", address: "0x5aa7649fdbda47de64a07ac81d64b682af9c0724", decimals: 18 },
-  { symbol: "wGOOGLx", address: "0x1630f08370917e79df0b7572395a5e907508bbbc", decimals: 18 },
-  { symbol: "wTSLAx", address: "0x43680abf18cf54898be84c6ef78237cfbd441883", decimals: 18 },
-  { symbol: "wSPYx", address: "0xc88fcd8b874fdb3256e8b55b3decb8c24eab4c02", decimals: 18 },
-  { symbol: "wQQQx", address: "0xdbd9232fee15351068fe02f0683146e16d9f2cea", decimals: 18 },
-  { symbol: "wMSTRx", address: "0x266e5923f6118f8b340ca5a23ae7f71897361476", decimals: 18 },
-  { symbol: "wMETAx", address: "0x4e41a262caa93c6575d336e0a4eb79f3c67caa06", decimals: 18 },
-  { symbol: "wCRCLx", address: "0xa90872aca656ebe47bdebf3b19ec9dd9c5adc7f8", decimals: 18 },
-  { symbol: "wHOODx", address: "0x953707d7a1cb30cc5c636bda8eaebe410341eb14", decimals: 18 },
+  // xStocks — displayed without "w" prefix (matching Fluxion UI), using wrapped pool addresses
+  { symbol: "NVDAx", address: "0x93e62845c1dd5822ebc807ab71a5fb750decd15a", decimals: 18 },
+  { symbol: "AAPLx", address: "0x5aa7649fdbda47de64a07ac81d64b682af9c0724", decimals: 18 },
+  { symbol: "GOOGLx", address: "0x1630f08370917e79df0b7572395a5e907508bbbc", decimals: 18 },
+  { symbol: "TSLAx", address: "0x43680abf18cf54898be84c6ef78237cfbd441883", decimals: 18 },
+  { symbol: "SPYx", address: "0xc88fcd8b874fdb3256e8b55b3decb8c24eab4c02", decimals: 18 },
+  { symbol: "QQQx", address: "0xdbd9232fee15351068fe02f0683146e16d9f2cea", decimals: 18 },
+  { symbol: "MSTRx", address: "0x266e5923f6118f8b340ca5a23ae7f71897361476", decimals: 18 },
+  { symbol: "METAx", address: "0x4e41a262caa93c6575d336e0a4eb79f3c67caa06", decimals: 18 },
+  { symbol: "CRCLx", address: "0xa90872aca656ebe47bdebf3b19ec9dd9c5adc7f8", decimals: 18 },
+  { symbol: "HOODx", address: "0x953707d7a1cb30cc5c636bda8eaebe410341eb14", decimals: 18 },
 ];
+
+// Map unwrapped xStock addresses → wrapped (pool) addresses
+const UNWRAPPED_TO_WRAPPED: Record<string, string> = {
+  "0xc845b2894dbddd03858fd2d643b4ef725fe0849d": "0x93e62845c1dd5822ebc807ab71a5fb750decd15a", // NVDAx
+  "0x9d275685dc284c8eb1c79f6aba7a63dc75ec890a": "0x5aa7649fdbda47de64a07ac81d64b682af9c0724", // AAPLx
+  "0xe92f673ca36c5e2efd2de7628f815f84807e803f": "0x1630f08370917e79df0b7572395a5e907508bbbc", // GOOGLx
+  "0x8ad3c73f833d3f9a523ab01476625f269aeb7cf0": "0x43680abf18cf54898be84c6ef78237cfbd441883", // TSLAx
+  "0x90a2a4c76b5d8c0bc892a69ea28aa775a8f2dd48": "0xc88fcd8b874fdb3256e8b55b3decb8c24eab4c02", // SPYx
+  "0xa753a7395cae905cd615da0b82a53e0560f250af": "0xdbd9232fee15351068fe02f0683146e16d9f2cea", // QQQx
+  "0xae2f842ef90c0d5213259ab82639d5bbf649b08e": "0x266e5923f6118f8b340ca5a23ae7f71897361476", // MSTRx
+  "0x96702be57cd9777f835117a809c7124fe4ec989a": "0x4e41a262caa93c6575d336e0a4eb79f3c67caa06", // METAx
+  "0xfebded1b0986a8ee107f5ab1a1c5a813491deceb": "0xa90872aca656ebe47bdebf3b19ec9dd9c5adc7f8", // CRCLx
+  "0xe1385fdd5ffb10081cd52c56584f25efa9084015": "0x953707d7a1cb30cc5c636bda8eaebe410341eb14", // HOODx
+};
+const WRAPPED_ADDRESSES = new Set(Object.values(UNWRAPPED_TO_WRAPPED).map(a => a.toLowerCase()));
+const resolveWrapped = (addr: string) => UNWRAPPED_TO_WRAPPED[addr.toLowerCase()] || addr;
 
 const ERC20_APPROVE_ABI = [{ inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], name: "approve", outputs: [{ type: "bool" }], stateMutability: "nonpayable", type: "function" }] as const;
 const ERC20_ALLOWANCE_ABI = [{ inputs: [{ name: "owner", type: "address" }, { name: "spender", type: "address" }], name: "allowance", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" }] as const;
@@ -1021,11 +1037,13 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
   const [outputBalance, setOutputBalance] = useState<string | null>(null);
   const [inputBalanceRaw, setInputBalanceRaw] = useState<bigint | null>(null);
 
-  // Build full token list: base tokens + xStocks
+  // Build full token list: base tokens + xStocks (skip xStocks that already have a wrapped version in BASE_TOKENS)
   const allTokens: SwapToken[] = useMemo(() => {
-    const xstockTokens: SwapToken[] = allXStocks.map(s => ({
-      symbol: s.symbol, address: s.mantleAddress, decimals: 18, logo: s.logo,
-    }));
+    const xstockTokens: SwapToken[] = allXStocks
+      .filter(s => !UNWRAPPED_TO_WRAPPED[s.mantleAddress.toLowerCase()]) // skip if wrapped version exists
+      .map(s => ({
+        symbol: s.symbol, address: resolveWrapped(s.mantleAddress), decimals: 18, logo: s.logo,
+      }));
     return [...BASE_TOKENS, ...xstockTokens];
   }, [allXStocks]);
 
@@ -1061,8 +1079,8 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
     inToken: SwapToken, outToken: SwapToken, rawAmountBigInt: bigint, userAddr: string
   ) => {
     if (!publicClient) return null;
-    const inputAddr = inToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : inToken.address;
-    const outputAddr = outToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : outToken.address;
+    const inputAddr = inToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : resolveWrapped(inToken.address);
+    const outputAddr = outToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : resolveWrapped(outToken.address);
     const feeTiers = [3000, 500, 10000];
     for (const fee of feeTiers) {
       try {
@@ -1110,8 +1128,8 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
     const rawAmountBigInt = BigInt(Math.floor(parseFloat(amount) * (10 ** inputToken.decimals)));
     const rawAmount = rawAmountBigInt.toString();
     // For native MNT swaps, use WMNT address in the quote (router wraps automatically)
-    const inputMint = inputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : inputToken.address;
-    const outputMint = outputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : outputToken.address;
+    const inputMint = inputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : resolveWrapped(inputToken.address);
+    const outputMint = outputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : resolveWrapped(outputToken.address);
     setQuoting(true);
     try {
       const res = await fetch(FLUXION_QUOTE_API, {
@@ -1179,8 +1197,8 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
         }
       }
       // Re-fetch a fresh quote right before executing to ensure deadline is valid
-      const inputMint = inputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : inputToken.address;
-      const outputMint = outputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : outputToken.address;
+      const inputMint = inputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : resolveWrapped(inputToken.address);
+      const outputMint = outputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : resolveWrapped(outputToken.address);
       let freshTx = quoteData.tx;
       try {
         const res = await fetch(FLUXION_QUOTE_API, {
