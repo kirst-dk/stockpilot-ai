@@ -1783,7 +1783,7 @@ function BridgeTab({ walletClient, onConnectWallet }: { walletClient: any; onCon
       </div>
 
       {/* Relay SwapWidget - direct on-page bridge */}
-      <div className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden relay-widget-container">
+      <div className="rounded-2xl overflow-hidden relay-widget-container" data-theme="dark">
         <RelaySwapWidget
           supportedWalletVMs={["evm"]}
           wallet={adaptedWallet}

@@ -21,10 +21,13 @@ const darkRelayTheme = {
   font: "Inter, sans-serif",
   primaryColor: "#3b82f6",
   focusColor: "#3b82f6",
-  subtleBorderColor: "rgba(255,255,255,0.08)",
+  subtleBackgroundColor: "#111827",
+  subtleBorderColor: "rgba(255,255,255,0.1)",
   text: {
-    default: "rgba(255,255,255,0.9)",
-    subtle: "rgba(255,255,255,0.4)",
+    default: "#f1f5f9",
+    subtle: "#94a3b8",
+    error: "#ef4444",
+    success: "#22c55e",
   },
   buttons: {
     primary: {
@@ -32,22 +35,60 @@ const darkRelayTheme = {
       background: "#3b82f6",
       hover: { color: "#ffffff", background: "#2563eb" },
     },
+    secondary: {
+      color: "#93c5fd",
+      background: "rgba(59,130,246,0.15)",
+      hover: { color: "#bfdbfe", background: "rgba(59,130,246,0.25)" },
+    },
+    tertiary: {
+      color: "#cbd5e1",
+      background: "rgba(255,255,255,0.05)",
+      hover: { color: "#e2e8f0", background: "rgba(255,255,255,0.1)" },
+    },
+    disabled: {
+      color: "#475569",
+      background: "#1e293b",
+    },
   },
   input: {
-    background: "rgba(255,255,255,0.04)",
-    color: "rgba(255,255,255,0.9)",
+    background: "rgba(255,255,255,0.05)",
+    borderRadius: "12px",
+    color: "#f1f5f9",
+  },
+  skeleton: {
+    background: "rgba(255,255,255,0.06)",
+  },
+  anchor: {
+    color: "#60a5fa",
+    hover: { color: "#93c5fd" },
   },
   dropdown: {
-    background: "#0d1220",
+    background: "#111827",
+    borderRadius: "12px",
     border: "1px solid rgba(255,255,255,0.1)",
   },
   modal: {
-    background: "#0d1220",
+    background: "#0f172a",
     border: "1px solid rgba(255,255,255,0.1)",
+    borderRadius: "16px",
   },
   widget: {
-    background: "rgba(255,255,255,0.02)",
+    background: "#0d1220",
+    borderRadius: "16px",
     border: "1px solid rgba(255,255,255,0.08)",
+    boxShadow: "0 4px 30px rgba(0,0,0,0.3)",
+    card: {
+      background: "rgba(255,255,255,0.03)",
+      borderRadius: "12px",
+      border: "1px solid rgba(255,255,255,0.06)",
+    },
+    selector: {
+      background: "rgba(255,255,255,0.04)",
+      hover: { background: "rgba(255,255,255,0.08)" },
+    },
+    swapCurrencyButtonBorderColor: "rgba(59,130,246,0.3)",
+    swapCurrencyButtonBorderWidth: "2px",
+    swapCurrencyButtonBorderRadius: "10px",
   },
 };
 
