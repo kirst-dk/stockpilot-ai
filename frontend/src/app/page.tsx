@@ -982,19 +982,19 @@ const BASE_TOKENS: SwapToken[] = [
   { symbol: "USDT", address: "0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE", decimals: 6 },
   { symbol: "WETH", address: "0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111", decimals: 18 },
   { symbol: "mETH", address: "0xcDA86A272531e8640cD7F1a92c01839911B90bb0", decimals: 18 },
-  // xStocks — displayed without "w" prefix (matching Fluxion UI), using wrapped pool addresses
-  { symbol: "SPYx", address: "0xc88fcd8b874fdb3256e8b55b3decb8c24eab4c02", decimals: 18 },
-  { symbol: "NVDAx", address: "0x93e62845c1dd5822ebc807ab71a5fb750decd15a", decimals: 18 },
-  { symbol: "AAPLx", address: "0x5aa7649fdbda47de64a07ac81d64b682af9c0724", decimals: 18 },
-  { symbol: "TSLAx", address: "0x43680abf18cf54898be84c6ef78237cfbd441883", decimals: 18 },
-  { symbol: "MSFTx", address: "0x63ad27614231767c8c489745b9145272de50d09b", decimals: 18 },
-  { symbol: "AMZNx", address: "0xac85d37acbadca37545e21ab0fb991bce8c1187c", decimals: 18 },
-  { symbol: "GOOGLx", address: "0x1630f08370917e79df0b7572395a5e907508bbbc", decimals: 18 },
-  { symbol: "METAx", address: "0x4e41a262caa93c6575d336e0a4eb79f3c67caa06", decimals: 18 },
-  { symbol: "QQQx", address: "0xdbd9232fee15351068fe02f0683146e16d9f2cea", decimals: 18 },
-  { symbol: "MSTRx", address: "0x266e5923f6118f8b340ca5a23ae7f71897361476", decimals: 18 },
-  { symbol: "CRCLx", address: "0xa90872aca656ebe47bdebf3b19ec9dd9c5adc7f8", decimals: 18 },
-  { symbol: "HOODx", address: "0x953707d7a1cb30cc5c636bda8eaebe410341eb14", decimals: 18 },
+  // xStocks — original contract addresses from xStocks API (GET /public/assets, network: Mantle)
+  { symbol: "SPYx", address: "0x90a2a4c76b5d8c0bc892a69ea28aa775a8f2dd48", decimals: 18 },
+  { symbol: "NVDAx", address: "0xc845b2894dbddd03858fd2d643b4ef725fe0849d", decimals: 18 },
+  { symbol: "AAPLx", address: "0x9d275685dc284c8eb1c79f6aba7a63dc75ec890a", decimals: 18 },
+  { symbol: "TSLAx", address: "0x8ad3c73f833d3f9a523ab01476625f269aeb7cf0", decimals: 18 },
+  { symbol: "MSFTx", address: "0x5621737f42dae558b81269fcb9e9e70c19aa6b35", decimals: 18 },
+  { symbol: "AMZNx", address: "0x3557ba345b01efa20a1bddc61f573bfd87195081", decimals: 18 },
+  { symbol: "GOOGLx", address: "0xe92f673ca36c5e2efd2de7628f815f84807e803f", decimals: 18 },
+  { symbol: "METAx", address: "0x96702be57cd9777f835117a809c7124fe4ec989a", decimals: 18 },
+  { symbol: "QQQx", address: "0xa753a7395cae905cd615da0b82a53e0560f250af", decimals: 18 },
+  { symbol: "MSTRx", address: "0xae2f842ef90c0d5213259ab82639d5bbf649b08e", decimals: 18 },
+  { symbol: "CRCLx", address: "0xfebded1b0986a8ee107f5ab1a1c5a813491deceb", decimals: 18 },
+  { symbol: "HOODx", address: "0xe1385fdd5ffb10081cd52c56584f25efa9084015", decimals: 18 },
 ];
 
 // Map ALL unwrapped xStock addresses → wrapped (pool) addresses (sourced from Fluxion)
@@ -1055,12 +1055,15 @@ const UNWRAPPED_TO_WRAPPED: Record<string, string> = {
   "0x7aefc9965699fbea943e03264d96e50cd4a97b21": "0xa24d9c43d64c76acd962003647fd43a85eb44db8", // WMTx
   "0xeedb0273c5af792745180e9ff568cd01550ffa13": "0x448bc811f60eac772775dd53421380e8d4dc4338", // XOMx
 };
-const WRAPPED_ADDRESSES = new Set(Object.values(UNWRAPPED_TO_WRAPPED).map(a => a.toLowerCase()));
 const resolveWrapped = (addr: string) => UNWRAPPED_TO_WRAPPED[addr.toLowerCase()] || addr;
+const isXStock = (addr: string) => !!UNWRAPPED_TO_WRAPPED[addr.toLowerCase()];
 
 const ERC20_APPROVE_ABI = [{ inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], name: "approve", outputs: [{ type: "bool" }], stateMutability: "nonpayable", type: "function" }] as const;
 const ERC20_ALLOWANCE_ABI = [{ inputs: [{ name: "owner", type: "address" }, { name: "spender", type: "address" }], name: "allowance", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" }] as const;
 const ERC20_BALANCE_ABI = [{ inputs: [{ name: "account", type: "address" }], name: "balanceOf", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" }] as const;
+// ERC-4626 vault ABI for wrapping/unwrapping xStocks
+const ERC4626_DEPOSIT_ABI = [{ inputs: [{ name: "assets", type: "uint256" }, { name: "receiver", type: "address" }], name: "deposit", outputs: [{ name: "shares", type: "uint256" }], stateMutability: "nonpayable", type: "function" }] as const;
+const ERC4626_REDEEM_ABI = [{ inputs: [{ name: "shares", type: "uint256" }, { name: "receiver", type: "address" }, { name: "owner", type: "address" }], name: "redeem", outputs: [{ name: "assets", type: "uint256" }], stateMutability: "nonpayable", type: "function" }] as const;
 const MAX_UINT256 = BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
 
 const FACTORY_GET_POOL_ABI = [{ inputs: [{ name: "tokenA", type: "address" }, { name: "tokenB", type: "address" }, { name: "fee", type: "uint24" }], name: "getPool", outputs: [{ name: "", type: "address" }], stateMutability: "view", type: "function" }] as const;
@@ -1084,12 +1087,13 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
   const [outputBalance, setOutputBalance] = useState<string | null>(null);
   const [inputBalanceRaw, setInputBalanceRaw] = useState<bigint | null>(null);
 
-  // Build full token list: base tokens + xStocks (skip xStocks that already have a wrapped version in BASE_TOKENS)
+  // Build full token list: base tokens + remaining xStocks from JSON (skip those already in BASE_TOKENS)
   const allTokens: SwapToken[] = useMemo(() => {
+    const baseAddrs = new Set(BASE_TOKENS.map(t => t.address.toLowerCase()));
     const xstockTokens: SwapToken[] = allXStocks
-      .filter(s => !UNWRAPPED_TO_WRAPPED[s.mantleAddress.toLowerCase()]) // skip if wrapped version exists
+      .filter(s => !baseAddrs.has(s.mantleAddress.toLowerCase()))
       .map(s => ({
-        symbol: s.symbol, address: resolveWrapped(s.mantleAddress), decimals: 18, logo: s.logo,
+        symbol: s.symbol, address: s.mantleAddress, decimals: 18, logo: s.logo,
       }));
     return [...BASE_TOKENS, ...xstockTokens];
   }, [allXStocks]);
@@ -1222,28 +1226,54 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
     if (!walletClient || !quoteData?.tx || !address || !publicClient) return;
     setSwapping(true); setSwapStatus(null);
     try {
-      // Use exact raw balance when MAX is used to avoid rounding issues
       const parsedAmount = parseFloat(inputAmount);
       const calcRaw = BigInt(Math.floor(parsedAmount * (10 ** inputToken.decimals)));
       const rawAmount = (inputBalanceRaw !== null && calcRaw >= inputBalanceRaw) ? inputBalanceRaw : calcRaw;
-      // Approve token spend (not needed for native MNT)
-      if (inputToken.address !== NATIVE_MNT_ADDRESS) {
-        // Check existing allowance first
-        const currentAllowance = await publicClient.readContract({
+      const inputIsXStock = isXStock(inputToken.address);
+      const outputIsXStock = isXStock(outputToken.address);
+      const wrappedInputAddr = resolveWrapped(inputToken.address) as `0x${string}`;
+
+      // Step 1: If selling an xStock, wrap it first (original → wrapped via ERC-4626 deposit)
+      if (inputIsXStock) {
+        // Approve original xStock for the wrapper contract
+        const wrapperAllowance = await publicClient.readContract({
           address: inputToken.address as `0x${string}`, abi: ERC20_ALLOWANCE_ABI,
+          functionName: "allowance", args: [address as `0x${string}`, wrappedInputAddr],
+        }) as bigint;
+        if (wrapperAllowance < rawAmount) {
+          setSwapStatus("Approving xStock for wrapping...");
+          const approveHash = await walletClient.writeContract({
+            address: inputToken.address as `0x${string}`, abi: ERC20_APPROVE_ABI,
+            functionName: "approve", args: [wrappedInputAddr, MAX_UINT256],
+          });
+          await publicClient.waitForTransactionReceipt({ hash: approveHash, confirmations: 1 });
+        }
+        setSwapStatus("Wrapping xStock...");
+        const depositHash = await walletClient.writeContract({
+          address: wrappedInputAddr, abi: ERC4626_DEPOSIT_ABI,
+          functionName: "deposit", args: [rawAmount, address as `0x${string}`],
+        });
+        await publicClient.waitForTransactionReceipt({ hash: depositHash, confirmations: 1 });
+      }
+
+      // Step 2: Approve the token the router will pull (wrapped for xStocks, original for others)
+      const routerTokenAddr = inputIsXStock ? wrappedInputAddr : inputToken.address as `0x${string}`;
+      if (inputToken.address !== NATIVE_MNT_ADDRESS) {
+        const currentAllowance = await publicClient.readContract({
+          address: routerTokenAddr, abi: ERC20_ALLOWANCE_ABI,
           functionName: "allowance", args: [address as `0x${string}`, FLUXION_ROUTER as `0x${string}`],
         }) as bigint;
         if (currentAllowance < rawAmount) {
-          setSwapStatus("Approving token...");
+          setSwapStatus("Approving token for swap...");
           const approveHash = await walletClient.writeContract({
-            address: inputToken.address as `0x${string}`, abi: ERC20_APPROVE_ABI,
+            address: routerTokenAddr, abi: ERC20_APPROVE_ABI,
             functionName: "approve", args: [FLUXION_ROUTER as `0x${string}`, MAX_UINT256],
           });
-          setSwapStatus("Waiting for approval confirmation...");
           await publicClient.waitForTransactionReceipt({ hash: approveHash, confirmations: 1 });
         }
       }
-      // Re-fetch a fresh quote right before executing to ensure deadline is valid
+
+      // Step 3: Execute the swap (always uses wrapped addresses via resolveWrapped)
       const inputMint = inputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : resolveWrapped(inputToken.address);
       const outputMint = outputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : resolveWrapped(outputToken.address);
       let freshTx = quoteData.tx;
@@ -1260,6 +1290,24 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
       const tx = await walletClient.sendTransaction({ to: freshTx.to as `0x${string}`, data: freshTx.data as `0x${string}`, value: BigInt(value) });
       setSwapStatus("Waiting for confirmation...");
       await publicClient.waitForTransactionReceipt({ hash: tx, confirmations: 1 });
+
+      // Step 4: If buying an xStock, unwrap it (wrapped → original via ERC-4626 redeem)
+      if (outputIsXStock) {
+        const wrappedOutputAddr = resolveWrapped(outputToken.address) as `0x${string}`;
+        const wrappedBal = await publicClient.readContract({
+          address: wrappedOutputAddr, abi: ERC20_BALANCE_ABI,
+          functionName: "balanceOf", args: [address as `0x${string}`],
+        }) as bigint;
+        if (wrappedBal > BigInt(0)) {
+          setSwapStatus("Unwrapping to original xStock...");
+          const redeemHash = await walletClient.writeContract({
+            address: wrappedOutputAddr, abi: ERC4626_REDEEM_ABI,
+            functionName: "redeem", args: [wrappedBal, address as `0x${string}`, address as `0x${string}`],
+          });
+          await publicClient.waitForTransactionReceipt({ hash: redeemHash, confirmations: 1 });
+        }
+      }
+
       setSwapStatus(`Swap successful! Tx: ${tx.slice(0, 10)}...`);
       setInputAmount(""); setOutputAmount(""); setQuoteData(null);
     } catch (err: any) { setSwapStatus(`Error: ${err.shortMessage || err.message || "Transaction failed"}`); }
