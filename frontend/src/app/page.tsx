@@ -13,6 +13,23 @@ const RelaySwapWidget = dynamic(
   { ssr: false, loading: () => <div className="flex items-center justify-center py-20"><div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full"></div></div> }
 );
 
+const BRIDGE_DEFAULT_FROM = {
+  chainId: 5000,
+  address: "0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9",
+  decimals: 6,
+  name: "USDC",
+  symbol: "USDC",
+  logoURI: "https://ethereum-optimism.github.io/data/USDC/logo.png",
+};
+const BRIDGE_DEFAULT_TO = {
+  chainId: 42161,
+  address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+  decimals: 6,
+  name: "USDC",
+  symbol: "USDC",
+  logoURI: "https://ethereum-optimism.github.io/data/USDC/logo.png",
+};
+
 const CONTRACT = "0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9";
 const NANSEN_API_KEY = process.env.NEXT_PUBLIC_NANSEN_API_KEY || "";
 const ELFA_API_KEY = process.env.NEXT_PUBLIC_ELFA_API_KEY || "";
@@ -1747,12 +1764,16 @@ function PoolsTab({ walletClient, isConnected, address, allXStocks }: { walletCl
 
 /* ========== BRIDGE TAB ========== */
 function BridgeTab({ walletClient, onConnectWallet }: { walletClient: any; onConnectWallet?: () => void }) {
-  const adaptedWallet = walletClient ? (() => {
+  const [fromToken, setFromToken] = useState<any>(BRIDGE_DEFAULT_FROM);
+  const [toToken, setToToken] = useState<any>(BRIDGE_DEFAULT_TO);
+
+  const adaptedWallet = useMemo(() => {
+    if (!walletClient) return undefined;
     try {
       const { adaptViemWallet } = require("@reservoir0x/relay-sdk");
       return adaptViemWallet(walletClient);
     } catch { return undefined; }
-  })() : undefined;
+  }, [walletClient]);
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -1764,9 +1785,13 @@ function BridgeTab({ walletClient, onConnectWallet }: { walletClient: any; onCon
       {/* Relay SwapWidget - direct on-page bridge */}
       <div className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden relay-widget-container">
         <RelaySwapWidget
-          lockChainId={5000}
           supportedWalletVMs={["evm"]}
           wallet={adaptedWallet}
+          fromToken={fromToken}
+          setFromToken={setFromToken}
+          toToken={toToken}
+          setToToken={setToToken}
+          popularChainIds={[5000, 42161, 8453, 1, 10]}
           onConnectWallet={onConnectWallet}
           multiWalletSupportEnabled={false}
           onSwapError={(error: string) => {
