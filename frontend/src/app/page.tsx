@@ -996,7 +996,9 @@ const BASE_TOKENS: SwapToken[] = [
 ];
 
 const ERC20_APPROVE_ABI = [{ inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], name: "approve", outputs: [{ type: "bool" }], stateMutability: "nonpayable", type: "function" }] as const;
+const ERC20_ALLOWANCE_ABI = [{ inputs: [{ name: "owner", type: "address" }, { name: "spender", type: "address" }], name: "allowance", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" }] as const;
 const ERC20_BALANCE_ABI = [{ inputs: [{ name: "account", type: "address" }], name: "balanceOf", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" }] as const;
+const MAX_UINT256 = BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
 
 const FACTORY_GET_POOL_ABI = [{ inputs: [{ name: "tokenA", type: "address" }, { name: "tokenB", type: "address" }, { name: "fee", type: "uint24" }], name: "getPool", outputs: [{ name: "", type: "address" }], stateMutability: "view", type: "function" }] as const;
 const POOL_SLOT0_ABI = [{ inputs: [], name: "slot0", outputs: [{ name: "sqrtPriceX96", type: "uint160" }, { name: "tick", type: "int24" }, { name: "observationIndex", type: "uint16" }, { name: "observationCardinality", type: "uint16" }, { name: "observationCardinalityNext", type: "uint16" }, { name: "feeProtocol", type: "uint8" }, { name: "unlocked", type: "bool" }], stateMutability: "view", type: "function" }] as const;
@@ -1148,21 +1150,45 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
   }, [inputAmount, fetchQuote]);
 
   const executeSwap = async () => {
-    if (!walletClient || !quoteData?.tx || !address) return;
+    if (!walletClient || !quoteData?.tx || !address || !publicClient) return;
     setSwapping(true); setSwapStatus(null);
     try {
       const rawAmount = BigInt(Math.floor(parseFloat(inputAmount) * (10 ** inputToken.decimals)));
       // Approve token spend (not needed for native MNT)
       if (inputToken.address !== NATIVE_MNT_ADDRESS) {
-        setSwapStatus("Approving token...");
-        await walletClient.writeContract({ address: inputToken.address as `0x${string}`, abi: ERC20_APPROVE_ABI, functionName: "approve", args: [FLUXION_ROUTER as `0x${string}`, rawAmount] });
-        setSwapStatus("Waiting for approval...");
-        await new Promise(r => setTimeout(r, 3000));
+        // Check existing allowance first
+        const currentAllowance = await publicClient.readContract({
+          address: inputToken.address as `0x${string}`, abi: ERC20_ALLOWANCE_ABI,
+          functionName: "allowance", args: [address as `0x${string}`, FLUXION_ROUTER as `0x${string}`],
+        }) as bigint;
+        if (currentAllowance < rawAmount) {
+          setSwapStatus("Approving token...");
+          const approveHash = await walletClient.writeContract({
+            address: inputToken.address as `0x${string}`, abi: ERC20_APPROVE_ABI,
+            functionName: "approve", args: [FLUXION_ROUTER as `0x${string}`, MAX_UINT256],
+          });
+          setSwapStatus("Waiting for approval confirmation...");
+          await publicClient.waitForTransactionReceipt({ hash: approveHash, confirmations: 1 });
+        }
       }
+      // Re-fetch a fresh quote right before executing to ensure deadline is valid
+      const inputMint = inputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : inputToken.address;
+      const outputMint = outputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : outputToken.address;
+      let freshTx = quoteData.tx;
+      try {
+        const res = await fetch(FLUXION_QUOTE_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ inputMint, outputMint, amount: rawAmount.toString(), userPublicKey: address, dynamicSlippage: false, slippageBps: "100" }),
+        });
+        const freshData = await res.json();
+        if (freshData.tx) { freshTx = freshData.tx; }
+      } catch { /* use cached quote tx data */ }
       setSwapStatus("Executing swap...");
-      const value = inputToken.address === NATIVE_MNT_ADDRESS ? rawAmount.toString() : (quoteData.tx.value || "0");
-      const tx = await walletClient.sendTransaction({ to: quoteData.tx.to as `0x${string}`, data: quoteData.tx.data as `0x${string}`, value: BigInt(value) });
-      setSwapStatus(`Swap submitted! Tx: ${tx.slice(0, 10)}...`);
+      const value = inputToken.address === NATIVE_MNT_ADDRESS ? rawAmount.toString() : (freshTx.value || "0");
+      const tx = await walletClient.sendTransaction({ to: freshTx.to as `0x${string}`, data: freshTx.data as `0x${string}`, value: BigInt(value) });
+      setSwapStatus("Waiting for confirmation...");
+      await publicClient.waitForTransactionReceipt({ hash: tx, confirmations: 1 });
+      setSwapStatus(`Swap successful! Tx: ${tx.slice(0, 10)}...`);
       setInputAmount(""); setOutputAmount(""); setQuoteData(null);
     } catch (err: any) { setSwapStatus(`Error: ${err.shortMessage || err.message || "Transaction failed"}`); }
     setSwapping(false);
