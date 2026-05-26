@@ -1019,6 +1019,7 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
   const [customAddress, setCustomAddress] = useState("");
   const [inputBalance, setInputBalance] = useState<string | null>(null);
   const [outputBalance, setOutputBalance] = useState<string | null>(null);
+  const [inputBalanceRaw, setInputBalanceRaw] = useState<bigint | null>(null);
 
   // Build full token list: base tokens + xStocks
   const allTokens: SwapToken[] = useMemo(() => {
@@ -1036,19 +1037,22 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
 
   // Fetch token balances
   useEffect(() => {
-    if (!address || !publicClient) { setInputBalance(null); setOutputBalance(null); return; }
-    const fetchBal = async (token: SwapToken, setter: (v: string | null) => void) => {
+    if (!address || !publicClient) { setInputBalance(null); setOutputBalance(null); setInputBalanceRaw(null); return; }
+    const fetchBal = async (token: SwapToken, setter: (v: string | null) => void, rawSetter?: (v: bigint | null) => void) => {
       try {
         if (token.address === NATIVE_MNT_ADDRESS) {
           const bal = await publicClient.getBalance({ address: address as `0x${string}` });
           setter((Number(bal) / (10 ** 18)).toFixed(4));
+          rawSetter?.(bal as bigint);
         } else {
           const bal = await publicClient.readContract({ address: token.address as `0x${string}`, abi: ERC20_BALANCE_ABI, functionName: "balanceOf", args: [address as `0x${string}`] });
-          setter((Number(bal) / (10 ** token.decimals)).toFixed(token.decimals <= 6 ? 2 : 4));
+          const numBal = Number(bal) / (10 ** token.decimals);
+          setter(numBal.toFixed(Math.min(token.decimals, 6)));
+          rawSetter?.(bal as bigint);
         }
-      } catch { setter(null); }
+      } catch { setter(null); rawSetter?.(null); }
     };
-    fetchBal(inputToken, setInputBalance);
+    fetchBal(inputToken, setInputBalance, setInputBalanceRaw);
     fetchBal(outputToken, setOutputBalance);
   }, [address, inputToken, outputToken, publicClient]);
 
@@ -1153,7 +1157,10 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
     if (!walletClient || !quoteData?.tx || !address || !publicClient) return;
     setSwapping(true); setSwapStatus(null);
     try {
-      const rawAmount = BigInt(Math.floor(parseFloat(inputAmount) * (10 ** inputToken.decimals)));
+      // Use exact raw balance when MAX is used to avoid rounding issues
+      const parsedAmount = parseFloat(inputAmount);
+      const calcRaw = BigInt(Math.floor(parsedAmount * (10 ** inputToken.decimals)));
+      const rawAmount = (inputBalanceRaw !== null && calcRaw >= inputBalanceRaw) ? inputBalanceRaw : calcRaw;
       // Approve token spend (not needed for native MNT)
       if (inputToken.address !== NATIVE_MNT_ADDRESS) {
         // Check existing allowance first
@@ -1268,7 +1275,7 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
                 <span className="text-[10px] text-white/40">You pay</span>
                 <span className="text-[10px] text-white/30 flex items-center gap-1">
                   {inputBalance !== null ? `Balance: ${inputBalance}` : "Balance: —"}
-                  {inputBalance && <button onClick={() => setInputAmount(inputBalance)} className="text-blue-400 hover:text-blue-300 font-semibold">MAX</button>}
+                  {inputBalance && <button onClick={() => { if (inputBalanceRaw !== null) { setInputAmount((Number(inputBalanceRaw) / (10 ** inputToken.decimals)).toString()); } else { setInputAmount(inputBalance); } }} className="text-blue-400 hover:text-blue-300 font-semibold">MAX</button>}
                 </span>
               </div>
               <div className="flex items-center gap-3">
