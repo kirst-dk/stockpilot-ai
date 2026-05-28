@@ -7,6 +7,12 @@ import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useBalance, useWalletClient, usePublicClient } from "wagmi";
 import { formatEther, encodeFunctionData } from "viem";
 import dynamic from "next/dynamic";
+import { StockyFloatingButton } from "@/components/concierge/StockyFloatingButton";
+import { StockyPanel } from "@/components/concierge/StockyPanel";
+import { LiveAnalyticsBanner } from "@/components/concierge/LiveAnalyticsBanner";
+import { SmartMoneyBadge } from "@/components/smart-money/SmartMoneyBadge";
+import { useStocky } from "@/components/concierge/StockyContext";
+import { setXStockCatalog } from "@/lib/intelligence/xstocks";
 
 const RelaySwapWidget = dynamic(
   () => import("@reservoir0x/relay-kit-ui").then((mod) => mod.SwapWidget),
@@ -171,7 +177,7 @@ const DEMO_ELFA: ElfaTrending[] = [
   { token: "SOL", current_count: 105, change_percent: 15.38 },
 ];
 
-type TabId = "market" | "swap" | "pools" | "bridge" | "dashboard" | "education";
+type TabId = "market" | "swap" | "pools" | "bridge" | "dashboard" | "stocky" | "education";
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "market", label: "Market", icon: "M2 12L5 7L8 9L11 4L14 8" },
@@ -179,6 +185,7 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "pools", label: "Pools", icon: "M8 2a6 6 0 100 12A6 6 0 008 2z" },
   { id: "bridge", label: "Bridge", icon: "M2 8h12M10 4l4 4-4 4" },
   { id: "dashboard", label: "Dashboard", icon: "M3 3h4v8H3zM9 3h4v4H9zM9 9h4v4H9z" },
+  { id: "stocky", label: "Stocky", icon: "M8 1L8 15M1 8L15 8" },
   { id: "education", label: "Education", icon: "M8 1L1 5l7 4 7-4-7-4zM1 9l7 4 7-4" },
 ];
 
@@ -212,6 +219,8 @@ export default function Home() {
   const { data: walletClient } = useWalletClient();
   const publicClient = usePublicClient();
   const strategy = STRATEGIES[activeStrategy];
+
+  const stocky = useStocky();
 
   const totalAllocation = Object.values(portfolioSelected).reduce((s, v) => s + v, 0);
   const selectedCount = Object.keys(portfolioSelected).length;
@@ -428,6 +437,20 @@ export default function Home() {
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
 
+  useEffect(() => {
+    if (allXStocks.length === 0) return;
+    setXStockCatalog(allXStocks.map(a => ({
+      symbol: a.symbol,
+      name: a.name,
+      address: a.mantleAddress,
+      deployments: a.networks?.map(n => ({ network: n, address: n === "Mantle" ? a.mantleAddress : undefined })),
+    })));
+  }, [allXStocks]);
+
+  useEffect(() => {
+    stocky.setEnv({ xStockCount: allXStocks.length, hasWallet: !!isConnected });
+  }, [allXStocks.length, isConnected, stocky]);
+
   const getFallbackResponse = useCallback((input: string): string => {
     const lower = input.toLowerCase();
     if (lower.includes("strat") || lower.includes("recommend")) return "Based on Nansen smart money flows, the Balanced Growth strategy shows the best risk-adjusted returns. ELFA sentiment is 82% bullish on AI sector.";
@@ -543,6 +566,9 @@ export default function Home() {
 
       {/* Main content */}
       <main className="flex-1 max-w-[1400px] mx-auto w-full px-4 py-6">
+        <div className="mb-4">
+          <LiveAnalyticsBanner />
+        </div>
         <AnimatePresence mode="wait">
           {activeTab === "market" && (
             <motion.div key="market" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
@@ -604,6 +630,11 @@ export default function Home() {
               />
             </motion.div>
           )}
+          {activeTab === "stocky" && (
+            <motion.div key="stocky" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
+              <StockyTabContent />
+            </motion.div>
+          )}
           {activeTab === "education" && (
             <motion.div key="education" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
               <EducationTab nansenData={nansenData} nansenLoading={nansenLoading} elfaData={elfaData} elfaLoading={elfaLoading} />
@@ -612,8 +643,11 @@ export default function Home() {
         </AnimatePresence>
       </main>
 
-      {/* AI Chat Widget */}
-      <div className="fixed bottom-5 right-5 z-[90]">
+      {/* Stocky AI Concierge */}
+      <StockyFloatingButton />
+
+      {/* Legacy chat widget (hidden, kept for now in case of fallback) */}
+      <div className="fixed bottom-5 right-5 z-[90] hidden" aria-hidden="true">
         <AnimatePresence>
           {chatOpen && (
             <motion.div
@@ -726,7 +760,7 @@ function MarketTab({
   setActiveTab: (t: TabId) => void;
 }) {
   const strategy = strategies[activeStrategy];
-  const [expandedStock, setExpandedStock] = useState<string | null>(null);
+  const stocky = useStocky();
 
   return (
     <div className="space-y-6">
@@ -897,7 +931,6 @@ function MarketTab({
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {filteredXStocks.map(stock => {
               const isBridgeable = BRIDGE_PRODUCTS.has(stock.symbol);
-              const isExpanded = expandedStock === stock.symbol;
               return (
                 <div key={stock.symbol} className="p-4 rounded-xl border border-white/5 bg-white/[0.015] hover:border-white/10 hover:bg-white/[0.03] transition-all duration-200">
                   <div className="flex items-center gap-2.5 mb-2">
@@ -913,6 +946,11 @@ function MarketTab({
                     {isBridgeable && (
                       <span className="text-[8px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full border border-emerald-500/20">BRIDGE</span>
                     )}
+                  </div>
+
+                  {/* Smart Money badge */}
+                  <div className="mb-2">
+                    <SmartMoneyBadge symbol={stock.symbol} tokenAddress={stock.mantleAddress} compact={false} />
                   </div>
 
                   {/* Networks */}
@@ -933,35 +971,15 @@ function MarketTab({
                     </a>
                   </div>
 
-                  {/* AI info expanded */}
-                  <AnimatePresence>
-                    {isExpanded && (
-                      <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden mb-3">
-                        <div className="p-3 rounded-lg border border-violet-500/20 bg-violet-500/[0.03]">
-                          {aiStockLoading[stock.symbol] ? (
-                            <div className="flex items-center gap-2 py-2">
-                              <span className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
-                              <span className="text-[10px] text-white/40">Analyzing...</span>
-                            </div>
-                          ) : aiStockInfo[stock.symbol] ? (
-                            <p className="text-[10px] text-white/60 leading-relaxed whitespace-pre-wrap">{aiStockInfo[stock.symbol]}</p>
-                          ) : null}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
                   {/* Actions */}
                   <div className="flex gap-1.5">
                     <button
-                      onClick={() => {
-                        if (isExpanded) { setExpandedStock(null); } else { setExpandedStock(stock.symbol); getStockAiInfo(stock.symbol); }
-                      }}
-                      className={`px-2 py-1.5 rounded-lg text-[10px] font-medium transition-all ${
-                        isExpanded ? "bg-violet-500/20 text-violet-400 border border-violet-500/30" : "bg-white/5 text-white/50 border border-white/5 hover:bg-white/10"
-                      }`}
+                      onClick={() => { stocky.open("floating"); stocky.analyzeXStock(stock.symbol); }}
+                      title={`Ask Stocky about ${stock.symbol}`}
+                      className="px-2.5 py-1.5 rounded-lg text-[10px] font-bold bg-gradient-to-br from-emerald-500/20 to-teal-500/20 text-emerald-300 border border-emerald-500/30 hover:from-emerald-500/30 hover:to-teal-500/30 transition-all flex items-center gap-1"
                     >
-                      AI
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse" />
+                      Ask Stocky
                     </button>
                     <button
                       onClick={() => setActiveTab("swap")}
@@ -2242,6 +2260,97 @@ function EducationTab({ nansenData, nansenLoading, elfaData, elfaLoading }: {
         </a>
         <div className="text-[9px] text-white/20 mt-1">Mantle Mainnet · ChainID 5000</div>
       </div>
+    </div>
+  );
+}
+
+/* ========== STOCKY TAB ========== */
+function StockyTabContent() {
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6 min-h-[600px]">
+      {/* Left: pitch + features */}
+      <div className="space-y-5">
+        <div className="rounded-2xl bg-gradient-to-br from-emerald-500/10 via-teal-500/[0.04] to-transparent border border-emerald-500/20 p-5">
+          <div className="flex items-start gap-3">
+            <div className="shrink-0 w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center text-2xl font-bold text-black shadow-[0_8px_28px_rgba(16,185,129,0.35)]">
+              S
+            </div>
+            <div>
+              <div className="text-xl font-bold text-white/95 leading-tight">Meet Stocky</div>
+              <div className="text-[12px] text-emerald-200/80 mt-0.5 tracking-wide">
+                Your live xStocks concierge. Powered by Nansen + ELFA + AltLLM.
+              </div>
+            </div>
+          </div>
+          <p className="text-[13px] text-white/70 leading-relaxed mt-4">
+            Ask anything about xStocks &mdash; Stocky checks <span className="text-orange-300">smart-money flows on-chain</span>,
+            verified <span className="text-violet-300">KOL sentiment from crypto Twitter</span>, and live DEX prices to give you
+            answers grounded in real data, not vibes. It works in any language &mdash; just type.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <FeatureTile
+            color="orange"
+            title="Smart Money"
+            body="Who's accumulating, who's dumping — straight from Nansen's labeled wallets."
+            badge="Nansen"
+          />
+          <FeatureTile
+            color="violet"
+            title="KOL Sentiment"
+            body="Verified Twitter mentions, engagement-weighted. Catch the narrative before it moves."
+            badge="ELFA"
+          />
+          <FeatureTile
+            color="emerald"
+            title="Tool-calling AI"
+            body="Stocky calls live data tools per question — you see exactly which sources it used."
+            badge="AltLLM"
+          />
+        </div>
+
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
+          <div className="text-[10px] font-bold tracking-[0.18em] text-white/40 uppercase">How it works</div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[12px] text-white/75">
+            <div>
+              <div className="text-emerald-300 font-bold mb-1">1. Ask</div>
+              Type anything in your language. Stocky auto-detects RU / EN / 中文 / 日本語 and more.
+            </div>
+            <div>
+              <div className="text-emerald-300 font-bold mb-1">2. Stocky pulls live data</div>
+              You watch tools execute: Nansen netflow → ELFA sentiment → DEX price. No mocks.
+            </div>
+            <div>
+              <div className="text-emerald-300 font-bold mb-1">3. Decide</div>
+              Get a clear verdict with numbers and sources. One click to jump into Swap.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Right: live chat panel */}
+      <div>
+        <StockyPanel variant="page" />
+      </div>
+    </div>
+  );
+}
+
+function FeatureTile({ color, title, body, badge }: { color: "orange" | "violet" | "emerald"; title: string; body: string; badge: string }) {
+  const palette: Record<string, { ring: string; bg: string; text: string; pill: string }> = {
+    orange:  { ring: "border-orange-500/25",  bg: "bg-orange-500/[0.04]",  text: "text-orange-300",  pill: "bg-orange-500/15 text-orange-200" },
+    violet:  { ring: "border-violet-500/25",  bg: "bg-violet-500/[0.04]",  text: "text-violet-300",  pill: "bg-violet-500/15 text-violet-200" },
+    emerald: { ring: "border-emerald-500/25", bg: "bg-emerald-500/[0.04]", text: "text-emerald-300", pill: "bg-emerald-500/15 text-emerald-200" },
+  };
+  const p = palette[color];
+  return (
+    <div className={`rounded-xl border ${p.ring} ${p.bg} p-4 space-y-2`}>
+      <div className="flex items-center justify-between">
+        <div className={`text-[13px] font-bold ${p.text}`}>{title}</div>
+        <span className={`text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded ${p.pill}`}>{badge}</span>
+      </div>
+      <p className="text-[11px] text-white/65 leading-relaxed">{body}</p>
     </div>
   );
 }

@@ -14,6 +14,7 @@ import "@reservoir0x/relay-kit-ui/styles.css";
 import { MAINNET_RELAY_API } from "@reservoir0x/relay-sdk";
 import { useRelayChains } from "@reservoir0x/relay-kit-hooks";
 import { ReactNode, useState, useEffect, useMemo } from "react";
+import { StockyProvider } from "@/components/concierge/StockyContext";
 
 const queryClient = new QueryClient();
 
@@ -164,7 +165,9 @@ function RelayChainLoader({ children }: { children: ReactNode }) {
 export default function Web3Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
-      <RelayChainLoader>{children}</RelayChainLoader>
+      <RelayChainLoader>
+        <StockyProvider>{children}</StockyProvider>
+      </RelayChainLoader>
     </QueryClientProvider>
   );
 }
