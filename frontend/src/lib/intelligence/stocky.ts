@@ -70,24 +70,42 @@ export async function runStockyTurn(
   const trace: ToolCallTrace[] = [];
   const cards: InlineCard[] = [];
 
-  // up to 3 turns: typically 1 tool round, sometimes 2.
-  for (let round = 0; round < 3; round++) {
+  // up to 4 turns: typically 1 tool round, sometimes 2.
+  // On the final round we drop `tools` so the model is forced to write a final answer.
+  const MAX_ROUNDS = 4;
+  for (let round = 0; round < MAX_ROUNDS; round++) {
     onProgress?.({ trace, status: "thinking" });
+    const isFinalRound = round === MAX_ROUNDS - 1;
+    // On the final round we (a) drop `tools` to force a text answer, and
+    // (b) switch to altllm-basic (non-reasoning) so the whole token budget
+    // is spent on the answer instead of internal reasoning_content.
     const resp = await altLLMChat(
-      { messages, tools: TOOLS, tool_choice: "auto", max_tokens: 900 },
+      isFinalRound
+        ? { model: "altllm-basic", messages, max_tokens: 700, temperature: 0.4 }
+        : { messages, tools: TOOLS, tool_choice: "auto", max_tokens: 900 },
       { signal: input.signal, timeoutMs: 60_000 },
     );
     const msg = altLLMMessage(resp);
     const calls = altLLMToolCalls(resp);
 
     if (!calls || calls.length === 0) {
-      // Final answer.
-      const finalText = (msg?.content ?? "").trim() || "(no response)";
+      // No tool calls requested. Usually means the model produced a final answer.
+      // But altllm-standard can also return empty content here (reasoning_content
+      // exhausted the token budget). If so, retry once with altllm-basic before
+      // giving up — this guarantees the user sees a real answer.
+      let finalText = (msg?.content ?? "").trim();
+      if (!finalText) {
+        const retry = await altLLMChat(
+          { model: "altllm-basic", messages, max_tokens: 700, temperature: 0.4 },
+          { signal: input.signal, timeoutMs: 60_000 },
+        );
+        finalText = (altLLMMessage(retry)?.content ?? "").trim();
+      }
       return {
         message: {
           id: nextId("a"),
           role: "assistant",
-          text: finalText,
+          text: finalText || "(no response)",
           cards: cards.length ? cards : undefined,
           toolTrace: trace.length ? trace : undefined,
           lang,

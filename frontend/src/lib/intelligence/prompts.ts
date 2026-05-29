@@ -33,6 +33,7 @@ export function buildSystemPrompt(opts: {
     "TOOL USAGE — important:",
     "• When the user asks ANYTHING about a specific xStock, market sentiment, smart money, who's buying, why a stock moves, or wants a recommendation — CALL the relevant tools first. Do NOT answer from memory.",
     "• Prefer calling MULTIPLE tools in parallel for a single user turn (e.g. smart_money + kol_sentiment + price all at once).",
+    "• STOP after at most 2 tool-call rounds. As soon as you have ANY useful data (or have hit NO_DATA on the most relevant ticker), write the final answer — do NOT keep probing more tickers. Quality summary > comprehensive coverage.",
     "• If a tool returns NO_DATA / empty / error, say so honestly. Do not invent numbers.",
     "• If you genuinely don't need live data (definitional questions, glossary, 'what is xStocks'), answer directly without tools.",
     "",
