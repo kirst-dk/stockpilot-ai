@@ -66,11 +66,15 @@ export function LiveAnalyticsBanner() {
       };
       const resp = await altLLMChat(
         {
+          // altllm-basic is non-reasoning → returns content immediately;
+          // altllm-standard uses 200+ tokens on reasoning_content and would
+          // hit finish_reason="length" with content=null at low max_tokens.
+          model: "altllm-basic",
           messages: [
             { role: "system", content: "You write ultra-concise 2-line market briefs. No markdown headings, no preamble." },
             { role: "user", content: liveBannerPrompt(state.lang, samples) },
           ],
-          max_tokens: 200,
+          max_tokens: 220,
           temperature: 0.6,
         },
         { timeoutMs: 30_000 },
