@@ -1588,8 +1588,8 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
                 </span>
               </div>
               <div className="flex items-center gap-3">
-                <input type="text" placeholder="0.0" value={inputAmount} onChange={(e) => setInputAmount(e.target.value.replace(/[^0-9.]/g, ""))}
-                  className="flex-1 bg-transparent text-2xl font-bold text-white/90 placeholder:text-white/20 focus:outline-none" />
+                <input type="text" inputMode="decimal" placeholder="0.0" value={inputAmount} onChange={(e) => setInputAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+                  className="flex-1 min-w-0 bg-transparent text-2xl font-bold text-white/90 placeholder:text-white/20 focus:outline-none" />
                 <button onClick={() => openSelector("input")}
                   className="shrink-0 pl-1.5 pr-2.5 py-1.5 rounded-full bg-white/5 border border-white/10 text-sm font-semibold text-white/90 flex items-center gap-1.5 hover:bg-white/10 transition-all">
                   <TokenIcon token={inputToken} size={24} />
@@ -1614,7 +1614,7 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
               </div>
               <div className="flex items-center gap-3">
                 <input type="text" placeholder="0.0" value={quoting ? "..." : outputAmount} readOnly
-                  className="flex-1 bg-transparent text-2xl font-bold text-white/90 placeholder:text-white/20 focus:outline-none" />
+                  className="flex-1 min-w-0 bg-transparent text-2xl font-bold text-white/90 placeholder:text-white/20 focus:outline-none" />
                 <button onClick={() => openSelector("output")}
                   className="shrink-0 pl-1.5 pr-2.5 py-1.5 rounded-full bg-white/5 border border-white/10 text-sm font-semibold text-white/90 flex items-center gap-1.5 hover:bg-white/10 transition-all">
                   <TokenIcon token={outputToken} size={24} />
