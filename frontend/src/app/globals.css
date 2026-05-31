@@ -62,6 +62,70 @@ html {
   max-width: 100% !important;
 }
 
+/* Relay dark theme overrides — applied globally for portals/modals */
+.relay-kit-reset {
+  --relay-colors-gray-1: #0d1220 !important;
+  --relay-colors-gray-2: #111827 !important;
+  --relay-colors-gray-3: #1e293b !important;
+  --relay-colors-gray-4: #283548 !important;
+  --relay-colors-gray-5: #334155 !important;
+  --relay-colors-gray-6: #475569 !important;
+  --relay-colors-gray-7: #64748b !important;
+  --relay-colors-gray-8: #94a3b8 !important;
+  --relay-colors-gray-9: #94a3b8 !important;
+  --relay-colors-gray-10: #cbd5e1 !important;
+  --relay-colors-gray-11: #e2e8f0 !important;
+  --relay-colors-gray-12: #f1f5f9 !important;
+  --relay-colors-gray1: #0d1220 !important;
+  --relay-colors-gray2: #111827 !important;
+  --relay-colors-gray3: #1e293b !important;
+  --relay-colors-gray6: #475569 !important;
+  --relay-colors-slate-1: #0d1220 !important;
+  --relay-colors-slate-2: #111827 !important;
+  --relay-colors-slate-3: #1e293b !important;
+  --relay-colors-slate-4: #283548 !important;
+  --relay-colors-slate-5: #334155 !important;
+  --relay-colors-slate-6: #475569 !important;
+  --relay-colors-slate-7: #64748b !important;
+  --relay-colors-slate-8: #94a3b8 !important;
+  --relay-colors-slate-9: #94a3b8 !important;
+  --relay-colors-slate-10: #cbd5e1 !important;
+  --relay-colors-slate-11: #e2e8f0 !important;
+  --relay-colors-slate-12: #f1f5f9 !important;
+  --relay-colors-widget-background: #0d1220 !important;
+  --relay-colors-modal-background: #0f172a !important;
+  --relay-colors-subtle-background-color: #111827 !important;
+  --relay-colors-input-background: rgba(255,255,255,0.05) !important;
+  --relay-colors-dropdown-background: #111827 !important;
+  --relay-colors-skeleton-background: rgba(255,255,255,0.06) !important;
+  --relay-colors-widget-card-background: rgba(255,255,255,0.03) !important;
+  --relay-colors-widget-selector-background: rgba(255,255,255,0.04) !important;
+  --relay-colors-widget-selector-hover-background: rgba(255,255,255,0.08) !important;
+  --relay-colors-text-default: #f1f5f9 !important;
+  --relay-colors-text-subtle: #94a3b8 !important;
+  color: #f1f5f9;
+}
+
+/* Relay Kit modal/dialog centering */
+[data-radix-dialog-overlay],
+[data-radix-popper-content-wrapper] {
+  z-index: 9999 !important;
+}
+[data-radix-dialog-overlay] {
+  position: fixed !important;
+  inset: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+[data-radix-dialog-content] {
+  position: relative !important;
+  margin: auto !important;
+  left: auto !important;
+  top: auto !important;
+  transform: none !important;
+}
+
 /* Ticker scroll animation */
 @keyframes scroll {
   0% { transform: translateX(0); }

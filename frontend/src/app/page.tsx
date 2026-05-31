@@ -5,13 +5,36 @@ import { motion, AnimatePresence } from "framer-motion";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useBalance, useWalletClient, usePublicClient } from "wagmi";
-import { formatEther } from "viem";
+import { formatEther, encodeFunctionData } from "viem";
 import dynamic from "next/dynamic";
+import { StockyFloatingButton } from "@/components/concierge/StockyFloatingButton";
+import { StockyPanel } from "@/components/concierge/StockyPanel";
+import { LiveAnalyticsBanner } from "@/components/concierge/LiveAnalyticsBanner";
+import { SmartMoneyBadge } from "@/components/smart-money/SmartMoneyBadge";
+import { useStocky } from "@/components/concierge/StockyContext";
+import { setXStockCatalog } from "@/lib/intelligence/xstocks";
 
 const RelaySwapWidget = dynamic(
   () => import("@reservoir0x/relay-kit-ui").then((mod) => mod.SwapWidget),
   { ssr: false, loading: () => <div className="flex items-center justify-center py-20"><div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full"></div></div> }
 );
+
+const BRIDGE_DEFAULT_FROM = {
+  chainId: 5000,
+  address: "0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9",
+  decimals: 6,
+  name: "USDC",
+  symbol: "USDC",
+  logoURI: "https://ethereum-optimism.github.io/data/USDC/logo.png",
+};
+const BRIDGE_DEFAULT_TO = {
+  chainId: 42161,
+  address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+  decimals: 6,
+  name: "USDC",
+  symbol: "USDC",
+  logoURI: "https://ethereum-optimism.github.io/data/USDC/logo.png",
+};
 
 const CONTRACT = "0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9";
 const NANSEN_API_KEY = process.env.NEXT_PUBLIC_NANSEN_API_KEY || "";
@@ -154,7 +177,7 @@ const DEMO_ELFA: ElfaTrending[] = [
   { token: "SOL", current_count: 105, change_percent: 15.38 },
 ];
 
-type TabId = "market" | "swap" | "pools" | "bridge" | "dashboard" | "education";
+type TabId = "market" | "swap" | "pools" | "bridge" | "dashboard" | "stocky" | "education";
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "market", label: "Market", icon: "M2 12L5 7L8 9L11 4L14 8" },
@@ -162,6 +185,7 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "pools", label: "Pools", icon: "M8 2a6 6 0 100 12A6 6 0 008 2z" },
   { id: "bridge", label: "Bridge", icon: "M2 8h12M10 4l4 4-4 4" },
   { id: "dashboard", label: "Dashboard", icon: "M3 3h4v8H3zM9 3h4v4H9zM9 9h4v4H9z" },
+  { id: "stocky", label: "Stocky", icon: "M8 1L8 15M1 8L15 8" },
   { id: "education", label: "Education", icon: "M8 1L1 5l7 4 7-4-7-4zM1 9l7 4 7-4" },
 ];
 
@@ -195,6 +219,8 @@ export default function Home() {
   const { data: walletClient } = useWalletClient();
   const publicClient = usePublicClient();
   const strategy = STRATEGIES[activeStrategy];
+
+  const stocky = useStocky();
 
   const totalAllocation = Object.values(portfolioSelected).reduce((s, v) => s + v, 0);
   const selectedCount = Object.keys(portfolioSelected).length;
@@ -411,6 +437,20 @@ export default function Home() {
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
 
+  useEffect(() => {
+    if (allXStocks.length === 0) return;
+    setXStockCatalog(allXStocks.map(a => ({
+      symbol: a.symbol,
+      name: a.name,
+      address: a.mantleAddress,
+      deployments: a.networks?.map(n => ({ network: n, address: n === "Mantle" ? a.mantleAddress : undefined })),
+    })));
+  }, [allXStocks]);
+
+  useEffect(() => {
+    stocky.setEnv({ xStockCount: allXStocks.length, hasWallet: !!isConnected });
+  }, [allXStocks.length, isConnected, stocky]);
+
   const getFallbackResponse = useCallback((input: string): string => {
     const lower = input.toLowerCase();
     if (lower.includes("strat") || lower.includes("recommend")) return "Based on Nansen smart money flows, the Balanced Growth strategy shows the best risk-adjusted returns. ELFA sentiment is 82% bullish on AI sector.";
@@ -526,6 +566,9 @@ export default function Home() {
 
       {/* Main content */}
       <main className="flex-1 max-w-[1400px] mx-auto w-full px-4 py-6">
+        <div className="mb-4">
+          <LiveAnalyticsBanner />
+        </div>
         <AnimatePresence mode="wait">
           {activeTab === "market" && (
             <motion.div key="market" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
@@ -587,6 +630,11 @@ export default function Home() {
               />
             </motion.div>
           )}
+          {activeTab === "stocky" && (
+            <motion.div key="stocky" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
+              <StockyTabContent />
+            </motion.div>
+          )}
           {activeTab === "education" && (
             <motion.div key="education" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
               <EducationTab nansenData={nansenData} nansenLoading={nansenLoading} elfaData={elfaData} elfaLoading={elfaLoading} />
@@ -595,8 +643,11 @@ export default function Home() {
         </AnimatePresence>
       </main>
 
-      {/* AI Chat Widget */}
-      <div className="fixed bottom-5 right-5 z-[90]">
+      {/* Stocky AI Concierge */}
+      <StockyFloatingButton />
+
+      {/* Legacy chat widget (hidden, kept for now in case of fallback) */}
+      <div className="fixed bottom-5 right-5 z-[90] hidden" aria-hidden="true">
         <AnimatePresence>
           {chatOpen && (
             <motion.div
@@ -709,7 +760,7 @@ function MarketTab({
   setActiveTab: (t: TabId) => void;
 }) {
   const strategy = strategies[activeStrategy];
-  const [expandedStock, setExpandedStock] = useState<string | null>(null);
+  const stocky = useStocky();
 
   return (
     <div className="space-y-6">
@@ -880,7 +931,6 @@ function MarketTab({
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {filteredXStocks.map(stock => {
               const isBridgeable = BRIDGE_PRODUCTS.has(stock.symbol);
-              const isExpanded = expandedStock === stock.symbol;
               return (
                 <div key={stock.symbol} className="p-4 rounded-xl border border-white/5 bg-white/[0.015] hover:border-white/10 hover:bg-white/[0.03] transition-all duration-200">
                   <div className="flex items-center gap-2.5 mb-2">
@@ -896,6 +946,11 @@ function MarketTab({
                     {isBridgeable && (
                       <span className="text-[8px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full border border-emerald-500/20">BRIDGE</span>
                     )}
+                  </div>
+
+                  {/* Smart Money badge */}
+                  <div className="mb-2">
+                    <SmartMoneyBadge symbol={stock.symbol} tokenAddress={stock.mantleAddress} compact={false} />
                   </div>
 
                   {/* Networks */}
@@ -916,35 +971,15 @@ function MarketTab({
                     </a>
                   </div>
 
-                  {/* AI info expanded */}
-                  <AnimatePresence>
-                    {isExpanded && (
-                      <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden mb-3">
-                        <div className="p-3 rounded-lg border border-violet-500/20 bg-violet-500/[0.03]">
-                          {aiStockLoading[stock.symbol] ? (
-                            <div className="flex items-center gap-2 py-2">
-                              <span className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
-                              <span className="text-[10px] text-white/40">Analyzing...</span>
-                            </div>
-                          ) : aiStockInfo[stock.symbol] ? (
-                            <p className="text-[10px] text-white/60 leading-relaxed whitespace-pre-wrap">{aiStockInfo[stock.symbol]}</p>
-                          ) : null}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
                   {/* Actions */}
                   <div className="flex gap-1.5">
                     <button
-                      onClick={() => {
-                        if (isExpanded) { setExpandedStock(null); } else { setExpandedStock(stock.symbol); getStockAiInfo(stock.symbol); }
-                      }}
-                      className={`px-2 py-1.5 rounded-lg text-[10px] font-medium transition-all ${
-                        isExpanded ? "bg-violet-500/20 text-violet-400 border border-violet-500/30" : "bg-white/5 text-white/50 border border-white/5 hover:bg-white/10"
-                      }`}
+                      onClick={() => { stocky.open("floating"); stocky.analyzeXStock(stock.symbol); }}
+                      title={`Ask Stocky about ${stock.symbol}`}
+                      className="px-2.5 py-1.5 rounded-lg text-[10px] font-bold bg-gradient-to-br from-emerald-500/20 to-teal-500/20 text-emerald-300 border border-emerald-500/30 hover:from-emerald-500/30 hover:to-teal-500/30 transition-all flex items-center gap-1"
                     >
-                      AI
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse" />
+                      Ask Stocky
                     </button>
                     <button
                       onClick={() => setActiveTab("swap")}
@@ -965,9 +1000,10 @@ function MarketTab({
 
 
 /* ========== SWAP TAB ========== */
-const FLUXION_QUOTE_API = "https://skillapi.fluxion.network/quote/exact-in";
+const FLUXION_QUOTE_API = "/api/fluxion/quote/exact-in";
 const FLUXION_ROUTER = "0x5628a59dF0ECAC3f3171f877A94bEb26BA6DFAa0";
 const FLUXION_FACTORY = "0xF883162Ed9c7E8EF604214c964c678E40c9B737C";
+const XSTOCK_SWAP_HELPER = "0xe2c17E812f506e1A2723618e787eE61B9E30470f";
 const USDC_MANTLE = "0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9";
 const WMNT_ADDRESS = "0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8";
 
@@ -982,10 +1018,93 @@ const BASE_TOKENS: SwapToken[] = [
   { symbol: "USDT", address: "0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE", decimals: 6 },
   { symbol: "WETH", address: "0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111", decimals: 18 },
   { symbol: "mETH", address: "0xcDA86A272531e8640cD7F1a92c01839911B90bb0", decimals: 18 },
+  // xStocks — original contract addresses from xStocks API (GET /public/assets, network: Mantle)
+  { symbol: "SPYx", address: "0x90a2a4c76b5d8c0bc892a69ea28aa775a8f2dd48", decimals: 18 },
+  { symbol: "NVDAx", address: "0xc845b2894dbddd03858fd2d643b4ef725fe0849d", decimals: 18 },
+  { symbol: "AAPLx", address: "0x9d275685dc284c8eb1c79f6aba7a63dc75ec890a", decimals: 18 },
+  { symbol: "TSLAx", address: "0x8ad3c73f833d3f9a523ab01476625f269aeb7cf0", decimals: 18 },
+  { symbol: "MSFTx", address: "0x5621737f42dae558b81269fcb9e9e70c19aa6b35", decimals: 18 },
+  { symbol: "AMZNx", address: "0x3557ba345b01efa20a1bddc61f573bfd87195081", decimals: 18 },
+  { symbol: "GOOGLx", address: "0xe92f673ca36c5e2efd2de7628f815f84807e803f", decimals: 18 },
+  { symbol: "METAx", address: "0x96702be57cd9777f835117a809c7124fe4ec989a", decimals: 18 },
+  { symbol: "QQQx", address: "0xa753a7395cae905cd615da0b82a53e0560f250af", decimals: 18 },
+  { symbol: "MSTRx", address: "0xae2f842ef90c0d5213259ab82639d5bbf649b08e", decimals: 18 },
+  { symbol: "CRCLx", address: "0xfebded1b0986a8ee107f5ab1a1c5a813491deceb", decimals: 18 },
+  { symbol: "HOODx", address: "0xe1385fdd5ffb10081cd52c56584f25efa9084015", decimals: 18 },
 ];
 
+// Map ALL unwrapped xStock addresses → wrapped (pool) addresses (sourced from Fluxion)
+const UNWRAPPED_TO_WRAPPED: Record<string, string> = {
+  "0x9d275685dc284c8eb1c79f6aba7a63dc75ec890a": "0x5aa7649fdbda47de64a07ac81d64b682af9c0724", // AAPLx
+  "0xfbf2398df672cee4afcc2a4a733222331c742a6a": "0x5cc079963fb70c0f987f65f539e3b61a6ebdf6db", // ABBVx
+  "0x89233399708c18ac6887f90a2b4cd8ba5fedd06e": "0xd812b37181ae89801e4bb3f49e4c1faf11fc0b57", // ABTx
+  "0x3557ba345b01efa20a1bddc61f573bfd87195081": "0xac85d37acbadca37545e21ab0fb991bce8c1187c", // AMZNx
+  "0x50a1291f69d9d3853def8209cfb1af0b46927be1": "0xd17e483364d849e3b3a52464bb2ca56626edfc31", // APPx
+  "0x38bac69cbbd28156796e4163b2b6dcb81e336565": "0x8deb752aaa807e0258afd5ccffe2b5a804026f28", // AVGOx
+  "0x5d642505fe1a28897eb3baba665f454755d8daa2": "0xb908feaeab7e671db697d77c3acfd8859e92a4e2", // AZNx
+  "0x314938c596f5ce31c3f75307d2979338c346d7f2": "0xa2b1335256cd663da89f650180508dd1f0dc3baa", // BACx
+  "0xbc7170a1280be28513b4e940c681537eb25e39f4": "0xd1a01e3f9c7565e88b1cf2413ba0a0e671e57b33", // CMCSAx
+  "0x364f210f430ec2448fc68a49203040f6124096f0": "0x3a98e79cdc7d8b2716a8696e25af028e429f11da", // COINx
+  "0xfebded1b0986a8ee107f5ab1a1c5a813491deceb": "0xa90872aca656ebe47bdebf3b19ec9dd9c5adc7f8", // CRCLx
+  "0x4a4073f2eaf299a1be22254dcd2c41727f6f54a2": "0xc6b6b8d50a6673c04c495e30b411da5a7adf39f5", // CRMx
+  "0x214151022c2a5e380ab80cdac31f23ae554a7345": "0xd71a6adbc40c2674591cdb11b8c7ae03a880b06e", // CRWDx
+  "0x053c784cd87b74f42e0c089f98643e79c1a3ff16": "0xcfa485bc42c2492917351f89f5cf5c7b2c5a66aa", // CSCOx
+  "0xad5cdc3340904285b8159089974a99a1a09eb4c0": "0x7f88888b7a81546a036554aa67a289ea428b20d4", // CVXx
+  "0xdba228936f4079daf9aa906fd48a87f2300405f4": "0x6c7ad1886a6da37766fed060d5f08ff43285dcdd", // DHRx
+  "0x2380f2673c640fb67e2d6b55b44c62f0e0e69da9": "0x61532ce3f1df7fbf5ffb7b891d184226e85b37c6", // GLDx
+  "0xe5f6d3b2405abdfe6f660e63202b25d23763160d": "0xb2f6ed0ed3eeb22bef7a648794ffc19b8af3761c", // GMEx
+  "0xe92f673ca36c5e2efd2de7628f815f84807e803f": "0x1630f08370917e79df0b7572395a5e907508bbbc", // GOOGLx
+  "0x3ee7e9b3a992fd23cd1c363b0e296856b04ab149": "0x6eed78e2780d82be4e37d9937c27bcf32c8da072", // GSx
+  "0x62a48560861b0b451654bfffdb5be6e47aa8ff1b": "0xbd1b73b2e89967e83507b500d798998200a53380", // HONx
+  "0xe1385fdd5ffb10081cd52c56584f25efa9084015": "0x953707d7a1cb30cc5c636bda8eaebe410341eb14", // HOODx
+  "0xd9913208647671fe0f48f7f260076b2c6f310aac": "0xa8f31436ffe4e71f51b2d65b7d5a5c457ae2000f", // IBMx
+  "0xf8a80d1cb9cfd70d03d655d9df42339846f3b3c8": "0x6a2a68ca7fc793d8cea36326a6ec1ef7ac3d9742", // INTCx
+  "0xdb0482cfad4789798623e64b15eeba01b16e917c": "0xcdb53a7cba9ec6d55dfe8f58bd6772826722d7bd", // JNJx
+  "0xd9fc3e075d45254a1d834fea18af8041207dea0a": "0xab635f839f81a12dc8db8ab31006af14e26292fe", // JPMx
+  "0xdcc1a2699441079da889b1f49e12b69cc791129b": "0x9a2486fbe7bc17c9100be65c31abe7c9bf84c23c", // KOx
+  "0x15059c599c16fd8f70b633ade165502d6402cd49": "0x316ffea434348c2cb72024e62ae845770315351e", // LINx
+  "0x19c41ea77b34bbdee61c3a87a75d1abda2ed0be4": "0x3644971a7e971f60e707f7e8716ccac5a0461290", // LLYx
+  "0xb365cd2588065f522d379ad19e903304f6b622c6": "0x5b32624f352d2fc6cc70889967a143ba1814f82b", // MAx
+  "0x80a77a372c1e12accda84299492f404902e2da67": "0x1717d8be2bcb27f4e8f36c817088fa6a2c0b3b30", // MCDx
+  "0x96702be57cd9777f835117a809c7124fe4ec989a": "0x4e41a262caa93c6575d336e0a4eb79f3c67caa06", // METAx
+  "0x17d8186ed8f68059124190d147174d0f6697dc40": "0x4728e48c2c201e32fe210aab68a71e419feac74a", // MRKx
+  "0xeaad46f4146ded5a47b55aa7f6c48c191deaec88": "0x0d6fce45796d5c00689c0916b976645a0ff1f0ce", // MRVLx
+  "0x5621737f42dae558b81269fcb9e9e70c19aa6b35": "0x63ad27614231767c8c489745b9145272de50d09b", // MSFTx
+  "0xae2f842ef90c0d5213259ab82639d5bbf649b08e": "0x266e5923f6118f8b340ca5a23ae7f71897361476", // MSTRx
+  "0xa6a65ac27e76cd53cb790473e4345c46e5ebf961": "0xfe0d2545f9e7f3678cb35ed3cdf70488c5570d11", // NFLXx
+  "0xc845b2894dbddd03858fd2d643b4ef725fe0849d": "0x93e62845c1dd5822ebc807ab71a5fb750decd15a", // NVDAx
+  "0xf9523e369c5f55ad72dbaa75b0a9b92b3d8b147e": "0x16e443aebc83e2089aa90431a1c0d311854eec69", // NVOx
+  "0x548308e91ec9f285c7bff05295badbd56a6e4971": "0x54f34ceb15313caaee838f77c1c3c2fe2e94526a", // ORCLx
+  "0x36c424a6ec0e264b1616102ad63ed2ad7857413e": "0xa00a5538708b5aca7045f2ca15104707965bac94", // PEPx
+  "0x1ac765b5bea23184802c7d2d497f7c33f1444a9e": "0x4e6894c3481b3a45393ce8ac9552945ad50a3758", // PFEx
+  "0xa90424d5d3e770e8644103ab503ed775dd1318fd": "0x0afc19943fa98e9e9e90fc4ab4d4d3c13e162232", // PGx
+  "0x6d482cec5f9dd1f05ccee9fd3ff79b246170f8e2": "0xa3b6fe1a923585bb828fcfaa460b78eefd5ae2ec", // PLTRx
+  "0x02a6c1789c3b4fdb1a7a3dfa39f90e5d3c94f4f9": "0x7c2e00e6b0d519a8c492d20c2524342a4398ff34", // PMx
+  "0xa753a7395cae905cd615da0b82a53e0560f250af": "0xdbd9232fee15351068fe02f0683146e16d9f2cea", // QQQx
+  "0x90a2a4c76b5d8c0bc892a69ea28aa775a8f2dd48": "0xc88fcd8b874fdb3256e8b55b3decb8c24eab4c02", // SPYx
+  "0x4cbf89ed7bb30b8a860fa86d3c96e9c72931299b": "0xcd932bf1c895b7143ec34df5ae7889d3853904d8", // TBLLx
+  "0xfdddb57878ef9d6f681ec4381dcb626b9e69ac86": "0x3d843414e617cbb9d2328c7ecf155d7c18139d6a", // TQQQx
+  "0x8ad3c73f833d3f9a523ab01476625f269aeb7cf0": "0x43680abf18cf54898be84c6ef78237cfbd441883", // TSLAx
+  "0x167a6375da1efc4a5be0f470e73ecefd66245048": "0xa0412ce46fe877b7f174b82acd95e70063bbaf2a", // UNHx
+  "0xbd730e618bcd88c82ddee52e10275cf2f88a4777": "0xe9161f111c55bdd67525c1d4f9bbca07750aaab7", // VTIx
+  "0x2363fd1235c1b6d3a5088ddf8df3a0b3a30c5293": "0x3cf193acf378ec224a0209be888b4b0b963e1896", // Vx
+  "0x7aefc9965699fbea943e03264d96e50cd4a97b21": "0xa24d9c43d64c76acd962003647fd43a85eb44db8", // WMTx
+  "0xeedb0273c5af792745180e9ff568cd01550ffa13": "0x448bc811f60eac772775dd53421380e8d4dc4338", // XOMx
+};
+const resolveWrapped = (addr: string) => UNWRAPPED_TO_WRAPPED[addr.toLowerCase()] || addr;
+const isXStock = (addr: string) => !!UNWRAPPED_TO_WRAPPED[addr.toLowerCase()];
+
 const ERC20_APPROVE_ABI = [{ inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], name: "approve", outputs: [{ type: "bool" }], stateMutability: "nonpayable", type: "function" }] as const;
+const ERC20_ALLOWANCE_ABI = [{ inputs: [{ name: "owner", type: "address" }, { name: "spender", type: "address" }], name: "allowance", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" }] as const;
 const ERC20_BALANCE_ABI = [{ inputs: [{ name: "account", type: "address" }], name: "balanceOf", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" }] as const;
+// SwapHelper ABI — single-tx wrap+swap or swap+unwrap for xStocks
+const SWAP_HELPER_WRAP_AND_SWAP_ABI = [{ inputs: [{ name: "xstock", type: "address" }, { name: "wrapper", type: "address" }, { name: "tokenOut", type: "address" }, { name: "amountIn", type: "uint256" }, { name: "fee", type: "uint24" }, { name: "amountOutMin", type: "uint256" }, { name: "deadline", type: "uint256" }], name: "wrapAndSwap", outputs: [{ name: "amountOut", type: "uint256" }], stateMutability: "nonpayable", type: "function" }] as const;
+const SWAP_HELPER_SWAP_AND_UNWRAP_ABI = [{ inputs: [{ name: "tokenIn", type: "address" }, { name: "wrapper", type: "address" }, { name: "amountIn", type: "uint256" }, { name: "fee", type: "uint24" }, { name: "amountOutMin", type: "uint256" }, { name: "deadline", type: "uint256" }], name: "swapAndUnwrap", outputs: [{ name: "assets", type: "uint256" }], stateMutability: "nonpayable", type: "function" }] as const;
+const MAX_UINT256 = BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+
+const FACTORY_GET_POOL_ABI = [{ inputs: [{ name: "tokenA", type: "address" }, { name: "tokenB", type: "address" }, { name: "fee", type: "uint24" }], name: "getPool", outputs: [{ name: "", type: "address" }], stateMutability: "view", type: "function" }] as const;
+const POOL_SLOT0_ABI = [{ inputs: [], name: "slot0", outputs: [{ name: "sqrtPriceX96", type: "uint160" }, { name: "tick", type: "int24" }, { name: "observationIndex", type: "uint16" }, { name: "observationCardinality", type: "uint16" }, { name: "observationCardinalityNext", type: "uint16" }, { name: "feeProtocol", type: "uint8" }, { name: "unlocked", type: "bool" }], stateMutability: "view", type: "function" }] as const;
+const SWAP_ROUTER_ABI = [{ inputs: [{ components: [{ name: "tokenIn", type: "address" }, { name: "tokenOut", type: "address" }, { name: "fee", type: "uint24" }, { name: "recipient", type: "address" }, { name: "deadline", type: "uint256" }, { name: "amountIn", type: "uint256" }, { name: "amountOutMinimum", type: "uint256" }, { name: "sqrtPriceLimitX96", type: "uint160" }], name: "params", type: "tuple" }], name: "exactInputSingle", outputs: [{ name: "amountOut", type: "uint256" }], stateMutability: "payable", type: "function" }] as const;
 
 function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient }: { walletClient: any; isConnected: boolean; address: string | undefined; allXStocks: XStockAsset[]; publicClient: any }) {
   const [inputAmount, setInputAmount] = useState("");
@@ -1002,12 +1121,16 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
   const [customAddress, setCustomAddress] = useState("");
   const [inputBalance, setInputBalance] = useState<string | null>(null);
   const [outputBalance, setOutputBalance] = useState<string | null>(null);
+  const [inputBalanceRaw, setInputBalanceRaw] = useState<bigint | null>(null);
 
-  // Build full token list: base tokens + xStocks
+  // Build full token list: base tokens + remaining xStocks from JSON (skip those already in BASE_TOKENS)
   const allTokens: SwapToken[] = useMemo(() => {
-    const xstockTokens: SwapToken[] = allXStocks.map(s => ({
-      symbol: s.symbol, address: s.mantleAddress, decimals: 18, logo: s.logo,
-    }));
+    const baseAddrs = new Set(BASE_TOKENS.map(t => t.address.toLowerCase()));
+    const xstockTokens: SwapToken[] = allXStocks
+      .filter(s => !baseAddrs.has(s.mantleAddress.toLowerCase()))
+      .map(s => ({
+        symbol: s.symbol, address: s.mantleAddress, decimals: 18, logo: s.logo,
+      }));
     return [...BASE_TOKENS, ...xstockTokens];
   }, [allXStocks]);
 
@@ -1019,29 +1142,81 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
 
   // Fetch token balances
   useEffect(() => {
-    if (!address || !publicClient) { setInputBalance(null); setOutputBalance(null); return; }
-    const fetchBal = async (token: SwapToken, setter: (v: string | null) => void) => {
+    if (!address || !publicClient) { setInputBalance(null); setOutputBalance(null); setInputBalanceRaw(null); return; }
+    const fetchBal = async (token: SwapToken, setter: (v: string | null) => void, rawSetter?: (v: bigint | null) => void) => {
       try {
         if (token.address === NATIVE_MNT_ADDRESS) {
           const bal = await publicClient.getBalance({ address: address as `0x${string}` });
           setter((Number(bal) / (10 ** 18)).toFixed(4));
+          rawSetter?.(bal as bigint);
         } else {
           const bal = await publicClient.readContract({ address: token.address as `0x${string}`, abi: ERC20_BALANCE_ABI, functionName: "balanceOf", args: [address as `0x${string}`] });
-          setter((Number(bal) / (10 ** token.decimals)).toFixed(token.decimals <= 6 ? 2 : 4));
+          const numBal = Number(bal) / (10 ** token.decimals);
+          setter(numBal.toFixed(Math.min(token.decimals, 6)));
+          rawSetter?.(bal as bigint);
         }
-      } catch { setter(null); }
+      } catch { setter(null); rawSetter?.(null); }
     };
-    fetchBal(inputToken, setInputBalance);
+    fetchBal(inputToken, setInputBalance, setInputBalanceRaw);
     fetchBal(outputToken, setOutputBalance);
   }, [address, inputToken, outputToken, publicClient]);
+
+  // Direct on-chain quote fallback for pools not indexed by Fluxion Quote API
+  const getDirectOnChainQuote = useCallback(async (
+    inToken: SwapToken, outToken: SwapToken, rawAmountBigInt: bigint, userAddr: string
+  ) => {
+    if (!publicClient) return null;
+    const inputAddr = inToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : resolveWrapped(inToken.address);
+    const outputAddr = outToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : resolveWrapped(outToken.address);
+    const feeTiers = [3000, 500, 10000];
+    for (const fee of feeTiers) {
+      try {
+        const poolAddress = await publicClient.readContract({
+          address: FLUXION_FACTORY as `0x${string}`, abi: FACTORY_GET_POOL_ABI, functionName: "getPool",
+          args: [inputAddr as `0x${string}`, outputAddr as `0x${string}`, fee],
+        });
+        if (!poolAddress || poolAddress === "0x0000000000000000000000000000000000000000") continue;
+        const slot0 = await publicClient.readContract({
+          address: poolAddress as `0x${string}`, abi: POOL_SLOT0_ABI, functionName: "slot0",
+        });
+        const sqrtPriceX96 = slot0[0] as bigint;
+        if (sqrtPriceX96 === BigInt(0)) continue;
+        const token0Addr = inputAddr.toLowerCase() < outputAddr.toLowerCase() ? inputAddr.toLowerCase() : outputAddr.toLowerCase();
+        const isToken0Input = inputAddr.toLowerCase() === token0Addr;
+        const Q192 = BigInt("6277101735386680763835789423207666416102355444464034512896");
+        let outAmount: bigint;
+        if (isToken0Input) {
+          outAmount = rawAmountBigInt * sqrtPriceX96 * sqrtPriceX96 / Q192;
+        } else {
+          outAmount = rawAmountBigInt * Q192 / (sqrtPriceX96 * sqrtPriceX96);
+        }
+        if (outAmount <= BigInt(0)) continue;
+        const minOutAmount = outAmount * BigInt(99) / BigInt(100);
+        const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800);
+        const swapCalldata = encodeFunctionData({
+          abi: SWAP_ROUTER_ABI, functionName: "exactInputSingle",
+          args: [{ tokenIn: inputAddr as `0x${string}`, tokenOut: outputAddr as `0x${string}`, fee, recipient: userAddr as `0x${string}`, deadline, amountIn: rawAmountBigInt, amountOutMinimum: minOutAmount, sqrtPriceLimitX96: BigInt(0) }],
+        });
+        const txValue = inToken.address === NATIVE_MNT_ADDRESS ? rawAmountBigInt.toString() : "0";
+        return {
+          outAmount: outAmount.toString(), minOutAmount: minOutAmount.toString(),
+          priceImpact: "< 0.5", route: `Direct V3 Pool (${(fee / 10000).toFixed(2)}%)`,
+          directSwap: true,
+          tx: { to: FLUXION_ROUTER, data: swapCalldata, value: txValue },
+        };
+      } catch { continue; }
+    }
+    return null;
+  }, [publicClient]);
 
   const fetchQuote = useCallback(async (amount: string) => {
     if (!amount || parseFloat(amount) <= 0) { setOutputAmount(""); setQuoteData(null); return; }
     if (!inputToken || !outputToken) return;
-    const rawAmount = BigInt(Math.floor(parseFloat(amount) * (10 ** inputToken.decimals))).toString();
+    const rawAmountBigInt = BigInt(Math.floor(parseFloat(amount) * (10 ** inputToken.decimals)));
+    const rawAmount = rawAmountBigInt.toString();
     // For native MNT swaps, use WMNT address in the quote (router wraps automatically)
-    const inputMint = inputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : inputToken.address;
-    const outputMint = outputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : outputToken.address;
+    const inputMint = inputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : resolveWrapped(inputToken.address);
+    const outputMint = outputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : resolveWrapped(outputToken.address);
     setQuoting(true);
     try {
       const res = await fetch(FLUXION_QUOTE_API, {
@@ -1053,32 +1228,157 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
         const out = parseFloat(data.outAmount) / (10 ** outputToken.decimals);
         setOutputAmount(out.toFixed(6));
         setQuoteData(data);
-      } else { setOutputAmount(""); setQuoteData(data.error ? { error: data.error } : null); }
-    } catch { setOutputAmount(""); setQuoteData(null); }
+      } else {
+        // API doesn't know this pool — try direct on-chain quote
+        const direct = await getDirectOnChainQuote(inputToken, outputToken, rawAmountBigInt, address || "0x0000000000000000000000000000000000000001");
+        if (direct) {
+          const out = parseFloat(direct.outAmount) / (10 ** outputToken.decimals);
+          setOutputAmount(out.toFixed(6));
+          setQuoteData(direct);
+        } else {
+          setOutputAmount(""); setQuoteData(data.error ? { error: data.error } : null);
+        }
+      }
+    } catch {
+      // Network error — try direct on-chain quote
+      const direct = await getDirectOnChainQuote(inputToken, outputToken, rawAmountBigInt, address || "0x0000000000000000000000000000000000000001");
+      if (direct) {
+        const out = parseFloat(direct.outAmount) / (10 ** outputToken.decimals);
+        setOutputAmount(out.toFixed(6));
+        setQuoteData(direct);
+      } else {
+        setOutputAmount(""); setQuoteData(null);
+      }
+    }
     setQuoting(false);
-  }, [inputToken, outputToken, address]);
+  }, [inputToken, outputToken, address, getDirectOnChainQuote]);
 
   useEffect(() => {
     const timer = setTimeout(() => { if (inputAmount) fetchQuote(inputAmount); }, 500);
     return () => clearTimeout(timer);
   }, [inputAmount, fetchQuote]);
 
+  // Find which fee tier a Fluxion pool uses for a given pair (wrapped addresses)
+  const findPoolFee = useCallback(async (tokenA: string, tokenB: string): Promise<number> => {
+    if (!publicClient) return 3000;
+    for (const fee of [3000, 500, 10000]) {
+      try {
+        const pool = await publicClient.readContract({
+          address: FLUXION_FACTORY as `0x${string}`, abi: FACTORY_GET_POOL_ABI, functionName: "getPool",
+          args: [tokenA as `0x${string}`, tokenB as `0x${string}`, fee],
+        }) as string;
+        if (pool && pool !== "0x0000000000000000000000000000000000000000") return fee;
+      } catch { continue; }
+    }
+    return 3000;
+  }, [publicClient]);
+
   const executeSwap = async () => {
-    if (!walletClient || !quoteData?.tx || !address) return;
+    if (!walletClient || !quoteData?.tx || !address || !publicClient) return;
     setSwapping(true); setSwapStatus(null);
     try {
-      const rawAmount = BigInt(Math.floor(parseFloat(inputAmount) * (10 ** inputToken.decimals)));
-      // Approve token spend (not needed for native MNT)
-      if (inputToken.address !== NATIVE_MNT_ADDRESS) {
-        setSwapStatus("Approving token...");
-        await walletClient.writeContract({ address: inputToken.address as `0x${string}`, abi: ERC20_APPROVE_ABI, functionName: "approve", args: [FLUXION_ROUTER as `0x${string}`, rawAmount] });
-        setSwapStatus("Waiting for approval...");
-        await new Promise(r => setTimeout(r, 3000));
+      const parsedAmount = parseFloat(inputAmount);
+      const calcRaw = BigInt(Math.floor(parsedAmount * (10 ** inputToken.decimals)));
+      const rawAmount = (inputBalanceRaw !== null && calcRaw >= inputBalanceRaw) ? inputBalanceRaw : calcRaw;
+      const inputIsXStock = isXStock(inputToken.address);
+      const outputIsXStock = isXStock(outputToken.address);
+      const helperAddr = XSTOCK_SWAP_HELPER as `0x${string}`;
+      const useHelper = helperAddr !== "0x0000000000000000000000000000000000000000" && (inputIsXStock || outputIsXStock);
+
+      if (useHelper && inputIsXStock) {
+        // SELLING xStock → token: single-tx via SwapHelper.wrapAndSwap()
+        const wrappedAddr = resolveWrapped(inputToken.address) as `0x${string}`;
+        const outputAddr = outputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS as `0x${string}` : resolveWrapped(outputToken.address) as `0x${string}`;
+        // Approve original xStock for the helper (one-time)
+        const allowance = await publicClient.readContract({
+          address: inputToken.address as `0x${string}`, abi: ERC20_ALLOWANCE_ABI,
+          functionName: "allowance", args: [address as `0x${string}`, helperAddr],
+        }) as bigint;
+        if (allowance < rawAmount) {
+          setSwapStatus("Approving token...");
+          const ah = await walletClient.writeContract({
+            address: inputToken.address as `0x${string}`, abi: ERC20_APPROVE_ABI,
+            functionName: "approve", args: [helperAddr, MAX_UINT256],
+          });
+          await publicClient.waitForTransactionReceipt({ hash: ah, confirmations: 1 });
+        }
+        const fee = await findPoolFee(wrappedAddr, outputAddr);
+        const minOut = quoteData.outAmount ? BigInt(quoteData.outAmount) * BigInt(99) / BigInt(100) : BigInt(0);
+        const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800);
+        setSwapStatus("Wrapping & swapping...");
+        const tx = await walletClient.writeContract({
+          address: helperAddr, abi: SWAP_HELPER_WRAP_AND_SWAP_ABI,
+          functionName: "wrapAndSwap",
+          args: [inputToken.address as `0x${string}`, wrappedAddr, outputAddr, rawAmount, fee, minOut, deadline],
+        });
+        setSwapStatus("Waiting for confirmation...");
+        await publicClient.waitForTransactionReceipt({ hash: tx, confirmations: 1 });
+        setSwapStatus(`Swap successful! Tx: ${tx.slice(0, 10)}...`);
+      } else if (useHelper && outputIsXStock) {
+        // BUYING xStock: single-tx via SwapHelper.swapAndUnwrap()
+        const wrappedAddr = resolveWrapped(outputToken.address) as `0x${string}`;
+        const inputAddr = inputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS as `0x${string}` : inputToken.address as `0x${string}`;
+        // Approve input token for the helper
+        if (inputToken.address !== NATIVE_MNT_ADDRESS) {
+          const allowance = await publicClient.readContract({
+            address: inputAddr, abi: ERC20_ALLOWANCE_ABI,
+            functionName: "allowance", args: [address as `0x${string}`, helperAddr],
+          }) as bigint;
+          if (allowance < rawAmount) {
+            setSwapStatus("Approving token...");
+            const ah = await walletClient.writeContract({
+              address: inputAddr, abi: ERC20_APPROVE_ABI,
+              functionName: "approve", args: [helperAddr, MAX_UINT256],
+            });
+            await publicClient.waitForTransactionReceipt({ hash: ah, confirmations: 1 });
+          }
+        }
+        const fee = await findPoolFee(inputAddr, wrappedAddr);
+        const minOut = quoteData.outAmount ? BigInt(quoteData.outAmount) * BigInt(99) / BigInt(100) : BigInt(0);
+        const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800);
+        setSwapStatus("Swapping & unwrapping...");
+        const tx = await walletClient.writeContract({
+          address: helperAddr, abi: SWAP_HELPER_SWAP_AND_UNWRAP_ABI,
+          functionName: "swapAndUnwrap",
+          args: [inputAddr, wrappedAddr, rawAmount, fee, minOut, deadline],
+        });
+        setSwapStatus("Waiting for confirmation...");
+        await publicClient.waitForTransactionReceipt({ hash: tx, confirmations: 1 });
+        setSwapStatus(`Swap successful! Tx: ${tx.slice(0, 10)}...`);
+      } else {
+        // Non-xStock swap: use Fluxion Quote API tx directly
+        if (inputToken.address !== NATIVE_MNT_ADDRESS) {
+          const currentAllowance = await publicClient.readContract({
+            address: inputToken.address as `0x${string}`, abi: ERC20_ALLOWANCE_ABI,
+            functionName: "allowance", args: [address as `0x${string}`, FLUXION_ROUTER as `0x${string}`],
+          }) as bigint;
+          if (currentAllowance < rawAmount) {
+            setSwapStatus("Approving token...");
+            const approveHash = await walletClient.writeContract({
+              address: inputToken.address as `0x${string}`, abi: ERC20_APPROVE_ABI,
+              functionName: "approve", args: [FLUXION_ROUTER as `0x${string}`, MAX_UINT256],
+            });
+            await publicClient.waitForTransactionReceipt({ hash: approveHash, confirmations: 1 });
+          }
+        }
+        const inputMint = inputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : resolveWrapped(inputToken.address);
+        const outputMint = outputToken.address === NATIVE_MNT_ADDRESS ? WMNT_ADDRESS : resolveWrapped(outputToken.address);
+        let freshTx = quoteData.tx;
+        try {
+          const res = await fetch(FLUXION_QUOTE_API, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ inputMint, outputMint, amount: rawAmount.toString(), userPublicKey: address, dynamicSlippage: false, slippageBps: "100" }),
+          });
+          const freshData = await res.json();
+          if (freshData.tx) { freshTx = freshData.tx; }
+        } catch { /* use cached quote tx data */ }
+        setSwapStatus("Executing swap...");
+        const value = inputToken.address === NATIVE_MNT_ADDRESS ? rawAmount.toString() : (freshTx.value || "0");
+        const tx = await walletClient.sendTransaction({ to: freshTx.to as `0x${string}`, data: freshTx.data as `0x${string}`, value: BigInt(value) });
+        setSwapStatus("Waiting for confirmation...");
+        await publicClient.waitForTransactionReceipt({ hash: tx, confirmations: 1 });
+        setSwapStatus(`Swap successful! Tx: ${tx.slice(0, 10)}...`);
       }
-      setSwapStatus("Executing swap...");
-      const value = inputToken.address === NATIVE_MNT_ADDRESS ? rawAmount.toString() : (quoteData.tx.value || "0");
-      const tx = await walletClient.sendTransaction({ to: quoteData.tx.to as `0x${string}`, data: quoteData.tx.data as `0x${string}`, value: BigInt(value) });
-      setSwapStatus(`Swap submitted! Tx: ${tx.slice(0, 10)}...`);
       setInputAmount(""); setOutputAmount(""); setQuoteData(null);
     } catch (err: any) { setSwapStatus(`Error: ${err.shortMessage || err.message || "Transaction failed"}`); }
     setSwapping(false);
@@ -1104,7 +1404,7 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
     if (!show) return null;
     const otherToken = side === "input" ? outputToken : inputToken;
     return (
-      <div className="absolute right-0 top-full mt-1 z-50 w-72 bg-[#0d1220] border border-white/10 rounded-xl overflow-hidden shadow-2xl">
+      <div className={`absolute right-0 z-50 w-72 bg-[#0d1220] border border-white/10 rounded-xl overflow-hidden shadow-2xl ${side === "output" ? "bottom-full mb-1" : "top-full mt-1"}`}>
         <div className="p-3 border-b border-white/5">
           <input type="text" placeholder="Search token or paste address..." value={tokenSearch} onChange={e => setTokenSearch(e.target.value)}
             className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-xs text-white/80 placeholder:text-white/30 focus:outline-none focus:border-blue-500/30" autoFocus />
@@ -1158,7 +1458,7 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
                 <span className="text-[10px] text-white/40">You pay</span>
                 <span className="text-[10px] text-white/30 flex items-center gap-1">
                   {inputBalance !== null ? `Balance: ${inputBalance}` : "Balance: —"}
-                  {inputBalance && <button onClick={() => setInputAmount(inputBalance)} className="text-blue-400 hover:text-blue-300 font-semibold">MAX</button>}
+                  {inputBalance && <button onClick={() => { if (inputBalanceRaw !== null) { setInputAmount((Number(inputBalanceRaw) / (10 ** inputToken.decimals)).toString()); } else { setInputAmount(inputBalance); } }} className="text-blue-400 hover:text-blue-300 font-semibold">MAX</button>}
                 </span>
               </div>
               <div className="flex items-center gap-3">
@@ -1167,7 +1467,7 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
                 <div className="relative">
                   <button onClick={() => { setShowInputSelect(!showInputSelect); setShowOutputSelect(false); setTokenSearch(""); }}
                     className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-sm font-semibold text-white/70 flex items-center gap-1.5 hover:bg-white/10 transition-all">
-                    <div className="w-5 h-5 rounded-full bg-blue-500/20 flex items-center justify-center text-[8px] font-bold text-blue-400">{inputToken.symbol[0]}</div>
+                    {inputToken.logo ? <img src={inputToken.logo} className="w-5 h-5 rounded-full bg-white/5" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-5 h-5 rounded-full bg-blue-500/20 flex items-center justify-center text-[8px] font-bold text-blue-400">{inputToken.symbol[0]}</div>}
                     {inputToken.symbol.length > 8 ? inputToken.symbol.slice(0, 8) + ".." : inputToken.symbol}
                     <svg width="8" height="8" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
                   </button>
@@ -1195,7 +1495,7 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
                 <div className="relative">
                   <button onClick={() => { setShowOutputSelect(!showOutputSelect); setShowInputSelect(false); setTokenSearch(""); }}
                     className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-sm font-semibold text-white/70 flex items-center gap-1.5 hover:bg-white/10 transition-all">
-                    <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center text-[8px] font-bold text-emerald-400">{outputToken.symbol[0]}</div>
+                    {outputToken.logo ? <img src={outputToken.logo} className="w-5 h-5 rounded-full bg-white/5" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center text-[8px] font-bold text-emerald-400">{outputToken.symbol[0]}</div>}
                     {outputToken.symbol.length > 8 ? outputToken.symbol.slice(0, 8) + ".." : outputToken.symbol}
                     <svg width="8" height="8" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
                   </button>
@@ -1269,27 +1569,7 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
         </div>
       </div>
 
-      {/* Popular pairs */}
-      <div className="mt-6">
-        <h3 className="text-xs font-semibold text-white/50 mb-3">Popular Pairs</h3>
-        <div className="grid grid-cols-2 gap-2">
-          {[
-            { in: "USDC", out: "WMNT" }, { in: "WMNT", out: "USDT" },
-            { in: "USDC", out: "SPYx" }, { in: "USDC", out: "NVDAx" },
-            { in: "USDC", out: "TSLAx" }, { in: "WMNT", out: "USDC" },
-          ].map(pair => {
-            const inT = allTokens.find(t => t.symbol === pair.in) || BASE_TOKENS[0];
-            const outT = allTokens.find(t => t.symbol === pair.out) || BASE_TOKENS[1];
-            return (
-              <button key={pair.in + pair.out} onClick={() => { setInputToken(inT); setOutputToken(outT); setInputAmount(""); setOutputAmount(""); setQuoteData(null); }}
-                className="p-3 rounded-xl border border-white/5 bg-white/[0.015] hover:border-white/10 hover:bg-white/[0.03] transition-all flex items-center justify-between">
-                <span className="text-xs font-medium text-white/70">{pair.in} → {pair.out}</span>
-                <span className="text-[9px] text-white/30">V3</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+
     </div>
   );
 }
@@ -1481,26 +1761,34 @@ function PoolsTab({ walletClient, isConnected, address, allXStocks }: { walletCl
 
 /* ========== BRIDGE TAB ========== */
 function BridgeTab({ walletClient, onConnectWallet }: { walletClient: any; onConnectWallet?: () => void }) {
-  const adaptedWallet = walletClient ? (() => {
+  const [fromToken, setFromToken] = useState<any>(BRIDGE_DEFAULT_FROM);
+  const [toToken, setToToken] = useState<any>(BRIDGE_DEFAULT_TO);
+
+  const adaptedWallet = useMemo(() => {
+    if (!walletClient) return undefined;
     try {
       const { adaptViemWallet } = require("@reservoir0x/relay-sdk");
       return adaptViemWallet(walletClient);
     } catch { return undefined; }
-  })() : undefined;
+  }, [walletClient]);
 
   return (
-    <div className="max-w-2xl mx-auto">
+    <div className="max-w-lg mx-auto px-4">
       <div className="text-center mb-6">
         <h2 className="text-xl font-bold mb-1">Bridge</h2>
         <p className="text-xs text-white/40">Cross-chain transfers powered by Relay</p>
       </div>
 
       {/* Relay SwapWidget - direct on-page bridge */}
-      <div className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden relay-widget-container">
+      <div className="rounded-2xl overflow-hidden relay-widget-container" data-theme="dark">
         <RelaySwapWidget
-          lockChainId={5000}
           supportedWalletVMs={["evm"]}
           wallet={adaptedWallet}
+          fromToken={fromToken}
+          setFromToken={setFromToken}
+          toToken={toToken}
+          setToToken={setToToken}
+          popularChainIds={[5000, 42161, 8453, 1, 10]}
           onConnectWallet={onConnectWallet}
           multiWalletSupportEnabled={false}
           onSwapError={(error: string) => {
@@ -1972,6 +2260,97 @@ function EducationTab({ nansenData, nansenLoading, elfaData, elfaLoading }: {
         </a>
         <div className="text-[9px] text-white/20 mt-1">Mantle Mainnet · ChainID 5000</div>
       </div>
+    </div>
+  );
+}
+
+/* ========== STOCKY TAB ========== */
+function StockyTabContent() {
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6 min-h-[600px]">
+      {/* Left: pitch + features */}
+      <div className="space-y-5">
+        <div className="rounded-2xl bg-gradient-to-br from-emerald-500/10 via-teal-500/[0.04] to-transparent border border-emerald-500/20 p-5">
+          <div className="flex items-start gap-3">
+            <div className="shrink-0 w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center text-2xl font-bold text-black shadow-[0_8px_28px_rgba(16,185,129,0.35)]">
+              S
+            </div>
+            <div>
+              <div className="text-xl font-bold text-white/95 leading-tight">Meet Stocky</div>
+              <div className="text-[12px] text-emerald-200/80 mt-0.5 tracking-wide">
+                Your live xStocks concierge. Powered by Nansen + ELFA + AltLLM.
+              </div>
+            </div>
+          </div>
+          <p className="text-[13px] text-white/70 leading-relaxed mt-4">
+            Ask anything about xStocks &mdash; Stocky checks <span className="text-orange-300">smart-money flows on-chain</span>,
+            verified <span className="text-violet-300">KOL sentiment from crypto Twitter</span>, and live DEX prices to give you
+            answers grounded in real data, not vibes. It works in any language &mdash; just type.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <FeatureTile
+            color="orange"
+            title="Smart Money"
+            body="Who's accumulating, who's dumping — straight from Nansen's labeled wallets."
+            badge="Nansen"
+          />
+          <FeatureTile
+            color="violet"
+            title="KOL Sentiment"
+            body="Verified Twitter mentions, engagement-weighted. Catch the narrative before it moves."
+            badge="ELFA"
+          />
+          <FeatureTile
+            color="emerald"
+            title="Tool-calling AI"
+            body="Stocky calls live data tools per question — you see exactly which sources it used."
+            badge="AltLLM"
+          />
+        </div>
+
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
+          <div className="text-[10px] font-bold tracking-[0.18em] text-white/40 uppercase">How it works</div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[12px] text-white/75">
+            <div>
+              <div className="text-emerald-300 font-bold mb-1">1. Ask</div>
+              Type anything in your language. Stocky auto-detects RU / EN / 中文 / 日本語 and more.
+            </div>
+            <div>
+              <div className="text-emerald-300 font-bold mb-1">2. Stocky pulls live data</div>
+              You watch tools execute: Nansen netflow → ELFA sentiment → DEX price. No mocks.
+            </div>
+            <div>
+              <div className="text-emerald-300 font-bold mb-1">3. Decide</div>
+              Get a clear verdict with numbers and sources. One click to jump into Swap.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Right: live chat panel */}
+      <div>
+        <StockyPanel variant="page" />
+      </div>
+    </div>
+  );
+}
+
+function FeatureTile({ color, title, body, badge }: { color: "orange" | "violet" | "emerald"; title: string; body: string; badge: string }) {
+  const palette: Record<string, { ring: string; bg: string; text: string; pill: string }> = {
+    orange:  { ring: "border-orange-500/25",  bg: "bg-orange-500/[0.04]",  text: "text-orange-300",  pill: "bg-orange-500/15 text-orange-200" },
+    violet:  { ring: "border-violet-500/25",  bg: "bg-violet-500/[0.04]",  text: "text-violet-300",  pill: "bg-violet-500/15 text-violet-200" },
+    emerald: { ring: "border-emerald-500/25", bg: "bg-emerald-500/[0.04]", text: "text-emerald-300", pill: "bg-emerald-500/15 text-emerald-200" },
+  };
+  const p = palette[color];
+  return (
+    <div className={`rounded-xl border ${p.ring} ${p.bg} p-4 space-y-2`}>
+      <div className="flex items-center justify-between">
+        <div className={`text-[13px] font-bold ${p.text}`}>{title}</div>
+        <span className={`text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded ${p.pill}`}>{badge}</span>
+      </div>
+      <p className="text-[11px] text-white/65 leading-relaxed">{body}</p>
     </div>
   );
 }
