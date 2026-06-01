@@ -601,7 +601,7 @@ export default function Home() {
           )}
           {activeTab === "pools" && (
             <motion.div key="pools" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-              <PoolsTab walletClient={walletClient} isConnected={isConnected} address={address} allXStocks={allXStocks} />
+              <PoolsTab walletClient={walletClient} isConnected={isConnected} address={address} allXStocks={allXStocks} publicClient={publicClient} />
             </motion.div>
           )}
           {activeTab === "bridge" && (
@@ -1708,88 +1708,402 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
 
 
 /* ========== POOLS TAB ========== */
-const POSITION_MANAGER = "0x2b70C4e7cA8E920435A5dB191e066E9E3AFd8DB3";
+// Fluxion AMM V3 (Uniswap V3 fork) on Mantle — verified against the Fluxion docs:
+// https://fluxion-network.gitbook.io/fluxion-network/developer-resources/technical-overview-and-api
+const POSITION_MANAGER = "0x2b70C4e7cA8E920435A5dB191e066E9E3AFd8DB3"; // NonfungiblePositionManager
+const MANTLE_EXPLORER = "https://explorer.mantle.xyz";
 
-function PoolsTab({ walletClient, isConnected, address, allXStocks }: { walletClient: any; isConnected: boolean; address: string | undefined; allXStocks: XStockAsset[] }) {
-  const [selectedPool, setSelectedPool] = useState<number | null>(null);
-  const [depositAmount, setDepositAmount] = useState("");
-  const [depositAmountB, setDepositAmountB] = useState("");
+// Reverse of UNWRAPPED_TO_WRAPPED: wrapped pool token (ERC-4626 vault) -> original xStock.
+const WRAPPED_TO_UNWRAPPED: Record<string, string> = Object.fromEntries(
+  Object.entries(UNWRAPPED_TO_WRAPPED).map(([unwrapped, wrapped]) => [wrapped.toLowerCase(), unwrapped.toLowerCase()])
+);
+
+// Tokens used as the quote side when discovering pools.
+const QUOTE_TOKENS: { symbol: string; address: string; decimals: number; logo?: string }[] = [
+  { symbol: "USDC", address: USDC_MANTLE, decimals: 6, logo: "/tokens/usdc.png" },
+  { symbol: "WMNT", address: WMNT_ADDRESS, decimals: 18, logo: "/tokens/mnt.png" },
+  { symbol: "WETH", address: "0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111", decimals: 18, logo: "/tokens/weth.png" },
+];
+const FEE_TIERS = [3000, 500, 10000] as const;
+const FEE_TICK_SPACING: Record<number, number> = { 100: 1, 500: 10, 3000: 60, 10000: 200 };
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+const POOL_LIQUIDITY_ABI = [{ inputs: [], name: "liquidity", outputs: [{ name: "", type: "uint128" }], stateMutability: "view", type: "function" }] as const;
+const ERC4626_ABI = [
+  { inputs: [{ name: "assets", type: "uint256" }, { name: "receiver", type: "address" }], name: "deposit", outputs: [{ name: "shares", type: "uint256" }], stateMutability: "nonpayable", type: "function" },
+  { inputs: [{ name: "assets", type: "uint256" }], name: "previewDeposit", outputs: [{ name: "shares", type: "uint256" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "asset", outputs: [{ name: "", type: "address" }], stateMutability: "view", type: "function" },
+] as const;
+const POSITION_MANAGER_MINT_ABI = [{
+  inputs: [{ components: [
+    { name: "token0", type: "address" }, { name: "token1", type: "address" }, { name: "fee", type: "uint24" },
+    { name: "tickLower", type: "int24" }, { name: "tickUpper", type: "int24" },
+    { name: "amount0Desired", type: "uint256" }, { name: "amount1Desired", type: "uint256" },
+    { name: "amount0Min", type: "uint256" }, { name: "amount1Min", type: "uint256" },
+    { name: "recipient", type: "address" }, { name: "deadline", type: "uint256" },
+  ], name: "params", type: "tuple" }],
+  name: "mint",
+  outputs: [{ name: "tokenId", type: "uint256" }, { name: "liquidity", type: "uint128" }, { name: "amount0", type: "uint256" }, { name: "amount1", type: "uint256" }],
+  stateMutability: "payable", type: "function",
+}] as const;
+
+interface PoolInfo {
+  key: string;
+  pool: string;
+  fee: number;
+  tickSpacing: number;
+  token0: string; token1: string;
+  // Display sides (A = the "stock"/volatile side, B = the quote side, usually USDC)
+  aSymbol: string; aLogo?: string; aDecimals: number; aAddress: string; aWrapped?: string; aIsXStock: boolean;
+  bSymbol: string; bLogo?: string; bDecimals: number; bAddress: string;
+  priceUsd: number;        // USD value of 1 unit of token A (quoted in token B, assumed USD-pegged when USDC)
+  tvlUsd: number;
+  reserveA: number; reserveB: number;
+  quoteIsUsd: boolean;
+}
+
+const fmtUsd = (n: number): string => {
+  if (!isFinite(n) || n <= 0) return "—";
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
+  if (n >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
+  return `$${n.toFixed(2)}`;
+};
+const fmtPrice = (n: number): string => {
+  if (!isFinite(n) || n <= 0) return "—";
+  if (n >= 1000) return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (n >= 1) return n.toFixed(2);
+  return n.toPrecision(4);
+};
+const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+function CopyAddress({ address, label }: { address: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); navigator.clipboard?.writeText(address); setCopied(true); setTimeout(() => setCopied(false), 1200); }}
+      className="inline-flex items-center gap-1 font-mono text-[10px] text-white/40 hover:text-white/70 transition-colors"
+      title={`Copy ${address}`}
+    >
+      {label ? <span className="text-white/30">{label}</span> : null}
+      <span>{shortAddr(address)}</span>
+      {copied
+        ? <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3 3 7-7" stroke="#34d399" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        : <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.3"/><path d="M3.5 10.5h-1A1.5 1.5 0 011 9V2.5A1.5 1.5 0 012.5 1H9a1.5 1.5 0 011.5 1.5v1" stroke="currentColor" strokeWidth="1.3"/></svg>}
+    </button>
+  );
+}
+
+function PoolsTab({ walletClient, isConnected, address, allXStocks, publicClient }: { walletClient: any; isConnected: boolean; address: string | undefined; allXStocks: XStockAsset[]; publicClient: any }) {
+  const [pools, setPools] = useState<PoolInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [poolFilter, setPoolFilter] = useState("");
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+
+  // Add-liquidity form state
+  const [amountA, setAmountA] = useState("");
+  const [amountB, setAmountB] = useState("");
+  const [lastEdited, setLastEdited] = useState<"a" | "b">("a");
+  const [balA, setBalA] = useState<number | null>(null);
+  const [balB, setBalB] = useState<number | null>(null);
   const [depositing, setDepositing] = useState(false);
   const [depositStatus, setDepositStatus] = useState<string | null>(null);
-  const [poolFilter, setPoolFilter] = useState("");
+  const [txHash, setTxHash] = useState<string | null>(null);
 
-  // Generate pool list from xStocks
-  const pools = useMemo(() => {
-    const basePools = FLUXION_RWA_POOLS.map(p => ({ ...p, tokenA: "USDC", tokenB: p.name.split(" / ")[1] || "?" }));
-    // Add WMNT pairs
-    basePools.push({ name: "WMNT / USDC", tvl: "$3.2M", apr: "8.5%", volume24h: "$2.1M", fee: "0.05%", type: "V3", tokenA: "WMNT", tokenB: "USDC" });
-    basePools.push({ name: "WMNT / USDT", tvl: "$1.4M", apr: "7.2%", volume24h: "$890K", fee: "0.05%", type: "V3", tokenA: "WMNT", tokenB: "USDT" });
-    basePools.push({ name: "WETH / WMNT", tvl: "$2.8M", apr: "6.8%", volume24h: "$1.5M", fee: "0.3%", type: "V3", tokenA: "WETH", tokenB: "WMNT" });
-    basePools.push({ name: "mETH / WMNT", tvl: "$1.9M", apr: "9.1%", volume24h: "$720K", fee: "0.3%", type: "V3", tokenA: "mETH", tokenB: "WMNT" });
-    return basePools;
+  // Catalog lookups: original xStock address -> { logo, symbol, name }
+  const catalogByAddr = useMemo(() => {
+    const m = new Map<string, { logo?: string; symbol: string; name?: string }>();
+    for (const s of allXStocks) m.set(s.mantleAddress.toLowerCase(), { logo: s.logo, symbol: s.symbol, name: s.name });
+    return m;
+  }, [allXStocks]);
+
+  const baseByAddr = useMemo(() => {
+    const m = new Map<string, { logo?: string; symbol: string; decimals: number }>();
+    for (const t of BASE_TOKENS) m.set(t.address.toLowerCase(), { logo: t.logo, symbol: t.symbol, decimals: t.decimals });
+    return m;
   }, []);
+
+  // ---- On-chain pool discovery -------------------------------------------------
+  const discover = useCallback(async () => {
+    if (!publicClient) return;
+    setLoading(true); setLoadError(null);
+    try {
+      // 1) Candidate (tokenA, tokenB, fee) triples.
+      type Cand = { aAddr: string; aWrapped?: string; bAddr: string; fee: number };
+      const cands: Cand[] = [];
+      // xStock pools: wrapped vault vs USDC (the live RWA pools on Fluxion).
+      for (const [unwrapped, wrapped] of Object.entries(UNWRAPPED_TO_WRAPPED)) {
+        for (const fee of FEE_TIERS) cands.push({ aAddr: unwrapped, aWrapped: wrapped, bAddr: USDC_MANTLE, fee });
+      }
+      // Base pairs (no xStock wrapper): WMNT/USDC, WETH/USDC.
+      for (const fee of FEE_TIERS) {
+        cands.push({ aAddr: WMNT_ADDRESS, bAddr: USDC_MANTLE, fee });
+        cands.push({ aAddr: "0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111", bAddr: USDC_MANTLE, fee });
+      }
+
+      const poolAddrs: (string)[] = await publicClient.multicall({
+        allowFailure: true,
+        contracts: cands.map(c => ({
+          address: FLUXION_FACTORY as `0x${string}`, abi: FACTORY_GET_POOL_ABI, functionName: "getPool",
+          args: [(c.aWrapped || c.aAddr) as `0x${string}`, c.bAddr as `0x${string}`, c.fee],
+        })),
+      }).then((rows: any[]) => rows.map(r => (r.status === "success" ? (r.result as string) : ZERO_ADDRESS)));
+
+      const live = cands
+        .map((c, i) => ({ c, pool: poolAddrs[i] }))
+        .filter(x => x.pool && x.pool !== ZERO_ADDRESS);
+
+      if (live.length === 0) { setPools([]); setLoading(false); return; }
+
+      // 2) Read price (slot0), liquidity and reserves for each live pool.
+      const detailCalls: any[] = [];
+      for (const { c, pool } of live) {
+        const tokenAddr = (c.aWrapped || c.aAddr) as `0x${string}`;
+        detailCalls.push({ address: pool as `0x${string}`, abi: POOL_SLOT0_ABI, functionName: "slot0" });
+        detailCalls.push({ address: pool as `0x${string}`, abi: POOL_LIQUIDITY_ABI, functionName: "liquidity" });
+        detailCalls.push({ address: c.bAddr as `0x${string}`, abi: ERC20_BALANCE_ABI, functionName: "balanceOf", args: [pool as `0x${string}`] });
+        detailCalls.push({ address: tokenAddr, abi: ERC20_BALANCE_ABI, functionName: "balanceOf", args: [pool as `0x${string}`] });
+      }
+      const details: any[] = await publicClient.multicall({ allowFailure: true, contracts: detailCalls });
+
+      // WMNT price in USD, derived from the WMNT/USDC pool (used to value WMNT-side reserves).
+      let wmntUsd = 0;
+
+      const out: PoolInfo[] = [];
+      for (let i = 0; i < live.length; i++) {
+        const { c, pool } = live[i];
+        const slot0 = details[i * 4];
+        const liqRow = details[i * 4 + 1];
+        const bBalRow = details[i * 4 + 2];
+        const aBalRow = details[i * 4 + 3];
+        if (slot0.status !== "success" || !slot0.result) continue;
+        const sqrtP = Number(slot0.result[0] as bigint);
+        if (!sqrtP) continue;
+
+        const tokenAddr = (c.aWrapped || c.aAddr);
+        const aDecimals = 18; // wrapped vaults + WMNT/WETH are all 18
+        const bDecimals = c.bAddr.toLowerCase() === USDC_MANTLE.toLowerCase() ? 6 : 18;
+
+        // token0 is the lower address (Uniswap sort order)
+        const token0 = tokenAddr.toLowerCase() < c.bAddr.toLowerCase() ? tokenAddr : c.bAddr;
+        const token1 = tokenAddr.toLowerCase() < c.bAddr.toLowerCase() ? c.bAddr : tokenAddr;
+        const dec0 = token0.toLowerCase() === c.bAddr.toLowerCase() ? bDecimals : aDecimals;
+        const dec1 = token1.toLowerCase() === c.bAddr.toLowerCase() ? bDecimals : aDecimals;
+        // price of token0 expressed in token1 units
+        const price1per0 = (sqrtP / 2 ** 96) ** 2 * (10 ** dec0) / (10 ** dec1);
+        const aIsToken0 = token0.toLowerCase() === tokenAddr.toLowerCase();
+        // price of token A in token B units
+        const priceAinB = aIsToken0 ? price1per0 : (price1per0 ? 1 / price1per0 : 0);
+
+        const reserveB = bBalRow.status === "success" ? Number(bBalRow.result as bigint) / 10 ** bDecimals : 0;
+        const reserveA = aBalRow.status === "success" ? Number(aBalRow.result as bigint) / 10 ** aDecimals : 0;
+
+        const quoteIsUsd = c.bAddr.toLowerCase() === USDC_MANTLE.toLowerCase();
+        if (c.aAddr.toLowerCase() === WMNT_ADDRESS.toLowerCase() && quoteIsUsd && priceAinB > 0) wmntUsd = priceAinB;
+
+        // resolve display metadata for token A
+        let aSymbol = "?", aLogo: string | undefined, aIsXStock = false;
+        const unwrappedLc = c.aWrapped ? WRAPPED_TO_UNWRAPPED[c.aWrapped.toLowerCase()] : c.aAddr.toLowerCase();
+        const cat = unwrappedLc ? catalogByAddr.get(unwrappedLc) : undefined;
+        if (c.aWrapped && cat) { aSymbol = cat.symbol; aLogo = cat.logo; aIsXStock = true; }
+        else {
+          const base = baseByAddr.get(c.aAddr.toLowerCase());
+          if (base) { aSymbol = base.symbol; aLogo = base.logo; }
+        }
+        const bMeta = baseByAddr.get(c.bAddr.toLowerCase());
+        const bSymbol = bMeta?.symbol || "USDC";
+        const bLogo = bMeta?.logo;
+
+        const priceUsd = quoteIsUsd ? priceAinB : priceAinB * wmntUsd;
+        const tvlUsd = quoteIsUsd
+          ? reserveB + reserveA * priceAinB
+          : (reserveB * wmntUsd) + (reserveA * priceUsd);
+
+        out.push({
+          key: `${pool}-${c.fee}`, pool, fee: c.fee, tickSpacing: FEE_TICK_SPACING[c.fee] || 60,
+          token0, token1,
+          aSymbol, aLogo, aDecimals, aAddress: c.aAddr, aWrapped: c.aWrapped, aIsXStock,
+          bSymbol, bLogo, bDecimals, bAddress: c.bAddr,
+          priceUsd, tvlUsd, reserveA, reserveB, quoteIsUsd,
+        });
+      }
+      out.sort((a, b) => b.tvlUsd - a.tvlUsd);
+      setPools(out);
+    } catch (err: any) {
+      setLoadError(err?.shortMessage || err?.message || "Failed to load pools");
+    }
+    setLoading(false);
+  }, [publicClient, catalogByAddr, baseByAddr]);
+
+  useEffect(() => { discover(); }, [discover]);
+
+  const totals = useMemo(() => {
+    const tvl = pools.reduce((s, p) => s + (isFinite(p.tvlUsd) ? p.tvlUsd : 0), 0);
+    return { tvl, count: pools.length };
+  }, [pools]);
 
   const filteredPools = useMemo(() => {
     if (!poolFilter) return pools;
     const q = poolFilter.toLowerCase();
-    return pools.filter(p => p.name.toLowerCase().includes(q));
+    return pools.filter(p =>
+      p.aSymbol.toLowerCase().includes(q) || p.bSymbol.toLowerCase().includes(q) ||
+      p.aAddress.toLowerCase().includes(q) || p.pool.toLowerCase().includes(q)
+    );
   }, [pools, poolFilter]);
 
-  const handleDeposit = async (poolIndex: number) => {
-    if (!walletClient || !isConnected || !address || !depositAmount) return;
-    setDepositing(true); setDepositStatus(null);
-    try {
-      const pool = filteredPools[poolIndex];
-      const tokenAInfo = BASE_TOKENS.find(t => t.symbol === pool.tokenA) || { address: USDC_MANTLE, decimals: 6 };
-      const amount = BigInt(Math.floor(parseFloat(depositAmount) * (10 ** tokenAInfo.decimals)));
-      // Approve token A for Position Manager
-      setDepositStatus(`Approving ${pool.tokenA}...`);
-      await walletClient.writeContract({ address: tokenAInfo.address as `0x${string}`, abi: ERC20_APPROVE_ABI, functionName: "approve", args: [POSITION_MANAGER as `0x${string}`, amount] });
-      setDepositStatus("Waiting for approval...");
-      await new Promise(r => setTimeout(r, 3000));
-      // If second token amount provided, approve that too
-      if (depositAmountB && parseFloat(depositAmountB) > 0) {
-        const tokenBAddr = allXStocks.find(x => x.symbol === pool.tokenB)?.mantleAddress || BASE_TOKENS.find(t => t.symbol === pool.tokenB)?.address;
-        if (tokenBAddr) {
-          const tokenBDecimals = BASE_TOKENS.find(t => t.symbol === pool.tokenB)?.decimals || 18;
-          const amountB = BigInt(Math.floor(parseFloat(depositAmountB) * (10 ** tokenBDecimals)));
-          setDepositStatus(`Approving ${pool.tokenB}...`);
-          await walletClient.writeContract({ address: tokenBAddr as `0x${string}`, abi: ERC20_APPROVE_ABI, functionName: "approve", args: [POSITION_MANAGER as `0x${string}`, amountB] });
-          await new Promise(r => setTimeout(r, 3000));
+  const selected = useMemo(() => pools.find(p => p.key === selectedKey) || null, [pools, selectedKey]);
+
+  // Load wallet balances for the selected pool's two tokens.
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!selected || !address || !publicClient) { setBalA(null); setBalB(null); return; }
+      try {
+        const [a, b] = await Promise.all([
+          publicClient.readContract({ address: selected.aAddress as `0x${string}`, abi: ERC20_BALANCE_ABI, functionName: "balanceOf", args: [address as `0x${string}`] }),
+          publicClient.readContract({ address: selected.bAddress as `0x${string}`, abi: ERC20_BALANCE_ABI, functionName: "balanceOf", args: [address as `0x${string}`] }),
+        ]);
+        if (!cancelled) {
+          setBalA(Number(a as bigint) / 10 ** selected.aDecimals);
+          setBalB(Number(b as bigint) / 10 ** selected.bDecimals);
         }
+      } catch { if (!cancelled) { setBalA(null); setBalB(null); } }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [selected, address, publicClient]);
+
+  const openPool = (key: string) => {
+    setSelectedKey(prev => (prev === key ? null : key));
+    setAmountA(""); setAmountB(""); setDepositStatus(null); setTxHash(null);
+  };
+
+  // Keep the two amount inputs in sync using the live pool price.
+  const onAmountA = (v: string) => {
+    const clean = v.replace(/[^0-9.]/g, "");
+    setAmountA(clean); setLastEdited("a");
+    if (selected && selected.priceUsd > 0 && clean) {
+      const other = parseFloat(clean) * selected.priceUsd;
+      if (isFinite(other)) setAmountB(other > 0 ? other.toFixed(selected.bDecimals === 6 ? 2 : 6) : "");
+    } else if (!clean) setAmountB("");
+  };
+  const onAmountB = (v: string) => {
+    const clean = v.replace(/[^0-9.]/g, "");
+    setAmountB(clean); setLastEdited("b");
+    if (selected && selected.priceUsd > 0 && clean) {
+      const other = parseFloat(clean) / selected.priceUsd;
+      if (isFinite(other)) setAmountA(other > 0 ? other.toFixed(6) : "");
+    } else if (!clean) setAmountA("");
+  };
+
+  const fullRangeTicks = (tickSpacing: number) => {
+    const MIN_TICK = -887272, MAX_TICK = 887272;
+    return {
+      tickLower: Math.ceil(MIN_TICK / tickSpacing) * tickSpacing,
+      tickUpper: Math.floor(MAX_TICK / tickSpacing) * tickSpacing,
+    };
+  };
+
+  const ensureAllowance = async (token: string, owner: string, spender: string, needed: bigint) => {
+    const current = await publicClient.readContract({
+      address: token as `0x${string}`, abi: ERC20_ALLOWANCE_ABI, functionName: "allowance",
+      args: [owner as `0x${string}`, spender as `0x${string}`],
+    }) as bigint;
+    if (current >= needed) return;
+    const hash = await walletClient.writeContract({
+      address: token as `0x${string}`, abi: ERC20_APPROVE_ABI, functionName: "approve",
+      args: [spender as `0x${string}`, MAX_UINT256],
+    });
+    await publicClient.waitForTransactionReceipt({ hash, confirmations: 1 });
+  };
+
+  const handleAddLiquidity = async () => {
+    if (!selected || !walletClient || !isConnected || !address || !publicClient) return;
+    if (!amountA || !amountB || parseFloat(amountA) <= 0 || parseFloat(amountB) <= 0) return;
+    setDepositing(true); setDepositStatus(null); setTxHash(null);
+    try {
+      const SLIPPAGE_BPS = BigInt(100); // 1%
+      const amountARaw = BigInt(Math.floor(parseFloat(amountA) * 10 ** selected.aDecimals));
+      const amountBRaw = BigInt(Math.floor(parseFloat(amountB) * 10 ** selected.bDecimals));
+
+      // The pool token for side A is the wrapped vault for xStocks, else the token itself.
+      const poolTokenA = (selected.aWrapped || selected.aAddress) as `0x${string}`;
+      let poolAmountARaw = amountARaw;
+
+      // 1) Wrap xStock -> ERC-4626 vault shares.
+      if (selected.aIsXStock && selected.aWrapped) {
+        setDepositStatus(`Approving ${selected.aSymbol} for wrapping…`);
+        await ensureAllowance(selected.aAddress, address, selected.aWrapped, amountARaw);
+        const shares = await publicClient.readContract({
+          address: selected.aWrapped as `0x${string}`, abi: ERC4626_ABI, functionName: "previewDeposit", args: [amountARaw],
+        }) as bigint;
+        setDepositStatus(`Wrapping ${selected.aSymbol}…`);
+        const wrapHash = await walletClient.writeContract({
+          address: selected.aWrapped as `0x${string}`, abi: ERC4626_ABI, functionName: "deposit",
+          args: [amountARaw, address as `0x${string}`],
+        });
+        await publicClient.waitForTransactionReceipt({ hash: wrapHash, confirmations: 1 });
+        poolAmountARaw = shares > BigInt(0) ? shares : amountARaw;
       }
-      setDepositStatus("Liquidity position submitted! It will appear in your Dashboard.");
-      setDepositAmount(""); setDepositAmountB("");
-      setTimeout(() => { setSelectedPool(null); setDepositStatus(null); }, 5000);
-    } catch (err: any) { setDepositStatus(`Error: ${err.shortMessage || err.message || "Failed"}`); }
+
+      // 2) Approve both pool tokens for the Position Manager.
+      setDepositStatus(`Approving ${selected.bSymbol}…`);
+      await ensureAllowance(selected.bAddress, address, POSITION_MANAGER, amountBRaw);
+      setDepositStatus(`Approving ${selected.aIsXStock ? "w" + selected.aSymbol : selected.aSymbol}…`);
+      await ensureAllowance(poolTokenA, address, POSITION_MANAGER, poolAmountARaw);
+
+      // 3) Build mint params (token0/token1 sorted, full-range).
+      const aIsToken0 = poolTokenA.toLowerCase() === selected.token0.toLowerCase();
+      const amount0Desired = aIsToken0 ? poolAmountARaw : amountBRaw;
+      const amount1Desired = aIsToken0 ? amountBRaw : poolAmountARaw;
+      const amount0Min = amount0Desired * (BigInt(10000) - SLIPPAGE_BPS) / BigInt(10000);
+      const amount1Min = amount1Desired * (BigInt(10000) - SLIPPAGE_BPS) / BigInt(10000);
+      const { tickLower, tickUpper } = fullRangeTicks(selected.tickSpacing);
+      const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800);
+
+      setDepositStatus("Minting liquidity position…");
+      const hash = await walletClient.writeContract({
+        address: POSITION_MANAGER as `0x${string}`, abi: POSITION_MANAGER_MINT_ABI, functionName: "mint",
+        args: [{
+          token0: selected.token0 as `0x${string}`, token1: selected.token1 as `0x${string}`, fee: selected.fee,
+          tickLower, tickUpper, amount0Desired, amount1Desired, amount0Min, amount1Min,
+          recipient: address as `0x${string}`, deadline,
+        }],
+      });
+      setDepositStatus("Waiting for confirmation…");
+      await publicClient.waitForTransactionReceipt({ hash, confirmations: 1 });
+      setTxHash(hash);
+      setDepositStatus("Liquidity added — position NFT minted to your wallet.");
+      setAmountA(""); setAmountB("");
+      discover();
+    } catch (err: any) {
+      setDepositStatus(`Error: ${err?.shortMessage || err?.message || "Transaction failed"}`);
+    }
     setDepositing(false);
   };
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h2 className="text-xl font-bold mb-1">Liquidity Pools</h2>
-          <p className="text-xs text-white/40">Provide liquidity on Fluxion V3 — earn trading fees</p>
+          <p className="text-xs text-white/40">Provide liquidity on Fluxion V3 (Uniswap V3 fork on Mantle) — earn trading fees on tokenized stocks</p>
         </div>
-        <div className="flex items-center gap-2 text-[10px] text-white/30">
-          <span>NonfungiblePositionManager: {POSITION_MANAGER.slice(0, 6)}...{POSITION_MANAGER.slice(-4)}</span>
-        </div>
+        <a href={`${MANTLE_EXPLORER}/address/${POSITION_MANAGER}`} target="_blank" rel="noopener noreferrer"
+          className="flex items-center gap-1.5 text-[10px] text-white/30 hover:text-white/60 transition-colors">
+          <span>PositionManager</span><span className="font-mono">{shortAddr(POSITION_MANAGER)}</span>
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M6 3h7v7M13 3L6.5 9.5M11 9v4H3V5h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </a>
       </div>
 
-      {/* Search */}
-      <div className="mb-4">
-        <input type="text" value={poolFilter} onChange={e => setPoolFilter(e.target.value)} placeholder="Search pools..."
-          className="w-full px-4 py-2.5 rounded-xl bg-white/[0.03] border border-white/10 text-xs text-white/80 placeholder:text-white/30 focus:outline-none focus:border-blue-500/30" />
-      </div>
-
-      {/* Pool stats */}
+      {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         {[
-          { label: "Total TVL", value: "$18.4M" },
-          { label: "24h Volume", value: "$8.2M" },
-          { label: "Avg APR", value: "11.2%" },
-          { label: "Active Pools", value: `${pools.length}` },
+          { label: "Total TVL", value: loading ? "…" : fmtUsd(totals.tvl) },
+          { label: "Active Pools", value: loading ? "…" : `${totals.count}` },
+          { label: "Protocol", value: "Fluxion V3" },
+          { label: "Network", value: "Mantle" },
         ].map((s, i) => (
           <div key={i} className="p-4 rounded-xl border border-white/5 bg-white/[0.02]">
             <div className="text-[10px] text-white/40 tracking-wider">{s.label}</div>
@@ -1798,84 +2112,153 @@ function PoolsTab({ walletClient, isConnected, address, allXStocks }: { walletCl
         ))}
       </div>
 
-      {/* Pool list */}
-      <div className="rounded-xl border border-white/5 bg-white/[0.01] overflow-x-auto">
-       <div className="min-w-[560px]">
-        <div className="grid grid-cols-6 gap-3 px-4 py-3 border-b border-white/5 text-[10px] font-semibold text-white/40 tracking-wider">
-          <span className="col-span-2">Pool</span>
-          <span className="text-right">TVL</span>
-          <span className="text-right">APR</span>
-          <span className="text-right">24h Volume</span>
-          <span className="text-right">Action</span>
-        </div>
-
-        {filteredPools.map((pool, i) => (
-          <div key={i}>
-            <div className="grid grid-cols-6 gap-3 px-4 py-3.5 border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors items-center">
-              <div className="col-span-2 flex items-center gap-2">
-                <div className="flex -space-x-1.5">
-                  <div className="w-6 h-6 rounded-full bg-blue-500/20 border-2 border-[#0a0e1a] flex items-center justify-center text-[7px] font-bold text-blue-400">U</div>
-                  <div className="w-6 h-6 rounded-full bg-emerald-500/20 border-2 border-[#0a0e1a] flex items-center justify-center text-[7px] font-bold text-emerald-400">{pool.name.split(" / ")[1]?.slice(0, 2)}</div>
-                </div>
-                <div>
-                  <div className="text-xs font-medium text-white/80">{pool.name}</div>
-                  <div className="text-[9px] text-white/30">{pool.type} · {pool.fee}</div>
-                </div>
-              </div>
-              <div className="text-right text-xs font-mono text-white/70">{pool.tvl}</div>
-              <div className="text-right text-xs font-mono text-emerald-400">{pool.apr}</div>
-              <div className="text-right text-xs font-mono text-white/50">{pool.volume24h}</div>
-              <div className="text-right">
-                <button onClick={() => setSelectedPool(selectedPool === i ? null : i)}
-                  className={`inline-flex px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all ${
-                    selectedPool === i ? "bg-red-600/20 text-red-400 border border-red-500/20" : "bg-blue-600/20 text-blue-400 border border-blue-500/20 hover:bg-blue-600/30"
-                  }`}>
-                  {selectedPool === i ? "Close" : "Deposit"}
-                </button>
-              </div>
-            </div>
-
-            {/* Inline deposit form */}
-            {selectedPool === i && (
-              <div className="px-4 py-4 bg-white/[0.02] border-b border-white/[0.05]">
-                <div className="max-w-lg mx-auto">
-                  <div className="text-xs font-semibold text-white/70 mb-3">Add Liquidity to {pool.name}</div>
-                  <div className="grid grid-cols-2 gap-3 mb-3">
-                    <div>
-                      <div className="text-[9px] text-white/40 mb-1">{pool.tokenA} Amount</div>
-                      <input type="text" placeholder="0.0" value={depositAmount} onChange={e => setDepositAmount(e.target.value.replace(/[^0-9.]/g, ""))}
-                        className="w-full px-3 py-2 rounded-lg bg-white/[0.03] border border-white/10 text-sm text-white/90 placeholder:text-white/20 focus:outline-none focus:border-blue-500/30" />
-                    </div>
-                    <div>
-                      <div className="text-[9px] text-white/40 mb-1">{pool.tokenB} Amount</div>
-                      <input type="text" placeholder="0.0" value={depositAmountB} onChange={e => setDepositAmountB(e.target.value.replace(/[^0-9.]/g, ""))}
-                        className="w-full px-3 py-2 rounded-lg bg-white/[0.03] border border-white/10 text-sm text-white/90 placeholder:text-white/20 focus:outline-none focus:border-blue-500/30" />
-                    </div>
-                  </div>
-                  <button onClick={() => handleDeposit(i)} disabled={!isConnected || !depositAmount || depositing}
-                    className={`w-full px-4 py-2.5 rounded-lg text-xs font-semibold transition-all ${
-                      isConnected && depositAmount && !depositing
-                        ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:shadow-lg hover:shadow-blue-500/20"
-                        : "bg-white/5 text-white/30 border border-white/10 cursor-not-allowed"
-                    }`}>
-                    {depositing ? "Processing..." : !isConnected ? "Connect Wallet" : "Add Liquidity"}
-                  </button>
-                  {depositStatus && (
-                    <div className={`mt-2 p-2 rounded-lg text-[10px] ${depositStatus.includes("Error") ? "bg-red-500/10 text-red-400" : "bg-blue-500/10 text-blue-400"}`}>
-                      {depositStatus}
-                    </div>
-                  )}
-                  <div className="mt-2 flex items-center justify-between text-[9px] text-white/30">
-                    <span>Fee tier: {pool.fee} · APR: {pool.apr}</span>
-                    <span>via NonfungiblePositionManager</span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
-       </div>
+      {/* Search */}
+      <div className="mb-4">
+        <input type="text" value={poolFilter} onChange={e => setPoolFilter(e.target.value)} placeholder="Search by token symbol or address…"
+          className="w-full px-4 py-2.5 rounded-xl bg-white/[0.03] border border-white/10 text-xs text-white/80 placeholder:text-white/30 focus:outline-none focus:border-blue-500/30" />
       </div>
+
+      {loading && (
+        <div className="flex items-center justify-center py-16 text-white/40 text-xs gap-3">
+          <div className="animate-spin w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full" />
+          Discovering live pools on Mantle…
+        </div>
+      )}
+
+      {!loading && loadError && (
+        <div className="p-4 rounded-xl border border-red-500/20 bg-red-500/5 text-xs text-red-300">
+          Could not load pools: {loadError}
+          <button onClick={discover} className="ml-3 underline hover:text-red-200">Retry</button>
+        </div>
+      )}
+
+      {!loading && !loadError && filteredPools.length === 0 && (
+        <div className="p-8 text-center text-white/40 text-xs rounded-xl border border-white/5 bg-white/[0.01]">No pools match your search.</div>
+      )}
+
+      {/* Pool cards */}
+      {!loading && !loadError && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          {filteredPools.map((pool) => {
+            const open = selectedKey === pool.key;
+            return (
+              <div key={pool.key} className={`rounded-xl border bg-white/[0.01] transition-colors ${open ? "border-blue-500/30" : "border-white/5 hover:border-white/10"}`}>
+                {/* Header */}
+                <div className="p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="flex -space-x-2 shrink-0">
+                        <TokenIcon token={{ symbol: pool.aSymbol, logo: pool.aLogo }} size={32} />
+                        <TokenIcon token={{ symbol: pool.bSymbol, logo: pool.bLogo }} size={32} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-white/90 truncate">{pool.aSymbol} / {pool.bSymbol}</div>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-white/50">V3</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-white/50">{(pool.fee / 10000).toFixed(2)}% fee</span>
+                          {pool.aIsXStock && <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300/80">RWA / xStock</span>}
+                        </div>
+                      </div>
+                    </div>
+                    <button onClick={() => openPool(pool.key)}
+                      className={`shrink-0 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
+                        open ? "bg-white/5 text-white/50 border border-white/10" : "bg-blue-600/20 text-blue-300 border border-blue-500/20 hover:bg-blue-600/30"
+                      }`}>
+                      {open ? "Close" : "Add Liquidity"}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 mt-3">
+                    <div>
+                      <div className="text-[9px] text-white/30 tracking-wider">TVL</div>
+                      <div className="text-xs font-mono text-white/80 mt-0.5">{fmtUsd(pool.tvlUsd)}</div>
+                    </div>
+                    <div>
+                      <div className="text-[9px] text-white/30 tracking-wider">{pool.aSymbol} PRICE</div>
+                      <div className="text-xs font-mono text-emerald-400/90 mt-0.5">{pool.quoteIsUsd || pool.priceUsd > 0 ? `$${fmtPrice(pool.priceUsd)}` : "—"}</div>
+                    </div>
+                    <div>
+                      <div className="text-[9px] text-white/30 tracking-wider">RESERVES</div>
+                      <div className="text-xs font-mono text-white/60 mt-0.5">{pool.reserveA >= 1 ? pool.reserveA.toFixed(1) : pool.reserveA.toPrecision(2)} {pool.aSymbol}</div>
+                    </div>
+                  </div>
+
+                  {/* Addresses */}
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 pt-3 border-t border-white/5">
+                    <a href={`${MANTLE_EXPLORER}/address/${pool.pool}`} target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[10px] text-white/40 hover:text-blue-300 transition-colors">
+                      <span className="text-white/30">Pool</span><span className="font-mono">{shortAddr(pool.pool)}</span>
+                      <svg width="9" height="9" viewBox="0 0 16 16" fill="none"><path d="M6 3h7v7M13 3L6.5 9.5M11 9v4H3V5h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    </a>
+                    <CopyAddress address={pool.aAddress} label={pool.aSymbol} />
+                    <CopyAddress address={pool.bAddress} label={pool.bSymbol} />
+                  </div>
+                </div>
+
+                {/* Add-liquidity form */}
+                {open && (
+                  <div className="px-4 pb-4 pt-1 border-t border-white/5">
+                    <div className="text-[11px] font-semibold text-white/70 mb-3">Add liquidity to {pool.aSymbol} / {pool.bSymbol}</div>
+                    {pool.aIsXStock && (
+                      <div className="mb-3 p-2 rounded-lg bg-blue-500/5 text-[10px] text-blue-200/70 leading-relaxed">
+                        {pool.aSymbol} is auto-wrapped into its Fluxion vault token before the position is minted. Two tokens are deposited at the current price into a full-range V3 position.
+                      </div>
+                    )}
+                    <div className="space-y-2.5">
+                      {/* Token A input */}
+                      <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center gap-1.5"><TokenIcon token={{ symbol: pool.aSymbol, logo: pool.aLogo }} size={18} /><span className="text-[11px] font-medium text-white/70">{pool.aSymbol}</span></div>
+                          <button onClick={() => balA != null && onAmountA(String(balA))} className="text-[9px] text-white/30 hover:text-white/60">
+                            Balance: {balA == null ? "—" : balA.toFixed(4)}{balA != null && balA > 0 ? " · Max" : ""}
+                          </button>
+                        </div>
+                        <input type="text" inputMode="decimal" placeholder="0.0" value={amountA} onChange={e => onAmountA(e.target.value)}
+                          className="w-full bg-transparent text-lg text-white/90 placeholder:text-white/20 focus:outline-none" />
+                      </div>
+                      {/* Token B input */}
+                      <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center gap-1.5"><TokenIcon token={{ symbol: pool.bSymbol, logo: pool.bLogo }} size={18} /><span className="text-[11px] font-medium text-white/70">{pool.bSymbol}</span></div>
+                          <button onClick={() => balB != null && onAmountB(String(balB))} className="text-[9px] text-white/30 hover:text-white/60">
+                            Balance: {balB == null ? "—" : balB.toFixed(4)}{balB != null && balB > 0 ? " · Max" : ""}
+                          </button>
+                        </div>
+                        <input type="text" inputMode="decimal" placeholder="0.0" value={amountB} onChange={e => onAmountB(e.target.value)}
+                          className="w-full bg-transparent text-lg text-white/90 placeholder:text-white/20 focus:outline-none" />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10px] text-white/30 mt-2.5">
+                      <span>Range: Full · Fee {(pool.fee / 10000).toFixed(2)}% · Slippage 1%</span>
+                      <span>1 {pool.aSymbol} ≈ ${fmtPrice(pool.priceUsd)}</span>
+                    </div>
+
+                    <button onClick={handleAddLiquidity}
+                      disabled={!isConnected || depositing || !amountA || !amountB || parseFloat(amountA || "0") <= 0}
+                      className={`w-full mt-3 px-4 py-2.5 rounded-lg text-xs font-semibold transition-all ${
+                        isConnected && amountA && amountB && !depositing && parseFloat(amountA || "0") > 0
+                          ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:shadow-lg hover:shadow-blue-500/20"
+                          : "bg-white/5 text-white/30 border border-white/10 cursor-not-allowed"
+                      }`}>
+                      {depositing ? "Processing…" : !isConnected ? "Connect Wallet" : "Add Liquidity"}
+                    </button>
+
+                    {depositStatus && (
+                      <div className={`mt-2 p-2 rounded-lg text-[10px] ${depositStatus.startsWith("Error") ? "bg-red-500/10 text-red-400" : "bg-blue-500/10 text-blue-300"}`}>
+                        {depositStatus}
+                        {txHash && (
+                          <a href={`${MANTLE_EXPLORER}/tx/${txHash}`} target="_blank" rel="noopener noreferrer" className="ml-1 underline hover:text-blue-200">View tx</a>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="mt-4 p-4 rounded-xl border border-white/5 bg-white/[0.01]">
         <div className="flex items-start gap-3">
@@ -1884,7 +2267,7 @@ function PoolsTab({ walletClient, isConnected, address, allXStocks }: { walletCl
           </div>
           <div>
             <h4 className="text-xs font-semibold text-white/70 mb-1">About RWA Pools</h4>
-            <p className="text-[10px] text-white/40 leading-relaxed">Fluxion RWA pools allow you to provide liquidity for tokenized equities (xStocks) and earn trading fees. Pools use Uniswap V2/V3 mechanics. Deposit USDC + xStock pair to earn yield from swap fees. Transactions execute directly through your connected wallet.</p>
+            <p className="text-[10px] text-white/40 leading-relaxed">Pools and prices are read live from the Fluxion V3 factory on Mantle. Providing liquidity deposits a token pair (tokenized stock + USDC) into a concentrated-liquidity position represented by an NFT held in your wallet, earning a share of swap fees. xStocks are wrapped into their Fluxion vault token automatically before minting. All transactions execute directly through your connected wallet.</p>
           </div>
         </div>
       </div>
