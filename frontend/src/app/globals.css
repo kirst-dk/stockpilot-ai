@@ -57,9 +57,18 @@ html {
 .relay-widget-container {
   min-height: 400px;
 }
+/* Center the widget and let it shrink on small screens.
+   The Relay widget renders with a fixed width (408px / min-width 300px);
+   we center it on desktop and allow it to fill narrow viewports. */
 .relay-widget-container > div {
   width: 100% !important;
   max-width: 100% !important;
+  display: flex !important;
+  justify-content: center !important;
+}
+.relay-widget-container > div > div {
+  max-width: 100% !important;
+  min-width: 0 !important;
 }
 
 /* Relay dark theme overrides — applied globally for portals/modals */

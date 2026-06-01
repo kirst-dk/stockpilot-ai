@@ -818,7 +818,7 @@ function MarketTab({
         <div className="grid lg:grid-cols-5 gap-4">
           <div className="lg:col-span-3 p-5 rounded-xl border border-white/5 bg-white/[0.02]">
             <h3 className="text-xs font-semibold text-white/50 tracking-wider uppercase mb-3">Allocation — {strategy.name}</h3>
-            <div className="flex items-center gap-6">
+            <div className="flex flex-col sm:flex-row items-center gap-6">
               <div className="w-[160px] h-[160px] flex-shrink-0">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
@@ -1667,7 +1667,8 @@ function PoolsTab({ walletClient, isConnected, address, allXStocks }: { walletCl
       </div>
 
       {/* Pool list */}
-      <div className="rounded-xl border border-white/5 bg-white/[0.01] overflow-hidden">
+      <div className="rounded-xl border border-white/5 bg-white/[0.01] overflow-x-auto">
+       <div className="min-w-[560px]">
         <div className="grid grid-cols-6 gap-3 px-4 py-3 border-b border-white/5 text-[10px] font-semibold text-white/40 tracking-wider">
           <span className="col-span-2">Pool</span>
           <span className="text-right">TVL</span>
@@ -1741,6 +1742,7 @@ function PoolsTab({ walletClient, isConnected, address, allXStocks }: { walletCl
             )}
           </div>
         ))}
+       </div>
       </div>
 
       <div className="mt-4 p-4 rounded-xl border border-white/5 bg-white/[0.01]">
@@ -1773,7 +1775,7 @@ function BridgeTab({ walletClient, onConnectWallet }: { walletClient: any; onCon
   }, [walletClient]);
 
   return (
-    <div className="max-w-lg mx-auto px-4">
+    <div className="w-full max-w-md mx-auto px-4 sm:px-0">
       <div className="text-center mb-6">
         <h2 className="text-xl font-bold mb-1">Bridge</h2>
         <p className="text-xs text-white/40">Cross-chain transfers powered by Relay</p>
