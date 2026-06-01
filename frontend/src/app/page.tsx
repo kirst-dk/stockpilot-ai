@@ -6,7 +6,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useBalance, useWalletClient, usePublicClient } from "wagmi";
-import { formatEther, encodeFunctionData } from "viem";
+import { formatEther, encodeFunctionData, createPublicClient, http as viemHttp } from "viem";
+import { mantle as mantleChain } from "viem/chains";
 import dynamic from "next/dynamic";
 import { StockyFloatingButton } from "@/components/concierge/StockyFloatingButton";
 import { StockyPanel } from "@/components/concierge/StockyPanel";
@@ -601,7 +602,7 @@ export default function Home() {
           )}
           {activeTab === "pools" && (
             <motion.div key="pools" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-              <PoolsTab walletClient={walletClient} isConnected={isConnected} address={address} allXStocks={allXStocks} publicClient={publicClient} />
+              <PoolsTab walletClient={walletClient} isConnected={isConnected} address={address} allXStocks={allXStocks} />
             </motion.div>
           )}
           {activeTab === "bridge" && (
@@ -1007,6 +1008,12 @@ const FLUXION_FACTORY = "0xF883162Ed9c7E8EF604214c964c678E40c9B737C";
 const XSTOCK_SWAP_HELPER = "0xe2c17E812f506e1A2723618e787eE61B9E30470f";
 const USDC_MANTLE = "0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9";
 const WMNT_ADDRESS = "0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8";
+
+// Dedicated read-only client pinned to Mantle. The ambient wagmi publicClient
+// follows the connected/default chain (which is not necessarily Mantle), so we
+// use this for all on-chain reads (pool discovery, balances, receipts).
+const MANTLE_RPC_URL = "https://rpc.mantle.xyz";
+const mantleClient = createPublicClient({ chain: mantleChain, transport: viemHttp(MANTLE_RPC_URL) });
 
 interface SwapToken { symbol: string; address: string; decimals: number; logo?: string; name?: string; }
 
@@ -1794,7 +1801,7 @@ function CopyAddress({ address, label }: { address: string; label?: string }) {
   );
 }
 
-function PoolsTab({ walletClient, isConnected, address, allXStocks, publicClient }: { walletClient: any; isConnected: boolean; address: string | undefined; allXStocks: XStockAsset[]; publicClient: any }) {
+function PoolsTab({ walletClient, isConnected, address, allXStocks }: { walletClient: any; isConnected: boolean; address: string | undefined; allXStocks: XStockAsset[] }) {
   const [pools, setPools] = useState<PoolInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1826,7 +1833,6 @@ function PoolsTab({ walletClient, isConnected, address, allXStocks, publicClient
 
   // ---- On-chain pool discovery -------------------------------------------------
   const discover = useCallback(async () => {
-    if (!publicClient) return;
     setLoading(true); setLoadError(null);
     try {
       // 1) Candidate (tokenA, tokenB, fee) triples.
@@ -1842,7 +1848,7 @@ function PoolsTab({ walletClient, isConnected, address, allXStocks, publicClient
         cands.push({ aAddr: "0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111", bAddr: USDC_MANTLE, fee });
       }
 
-      const poolAddrs: (string)[] = await publicClient.multicall({
+      const poolAddrs: (string)[] = await mantleClient.multicall({
         allowFailure: true,
         contracts: cands.map(c => ({
           address: FLUXION_FACTORY as `0x${string}`, abi: FACTORY_GET_POOL_ABI, functionName: "getPool",
@@ -1865,7 +1871,7 @@ function PoolsTab({ walletClient, isConnected, address, allXStocks, publicClient
         detailCalls.push({ address: c.bAddr as `0x${string}`, abi: ERC20_BALANCE_ABI, functionName: "balanceOf", args: [pool as `0x${string}`] });
         detailCalls.push({ address: tokenAddr, abi: ERC20_BALANCE_ABI, functionName: "balanceOf", args: [pool as `0x${string}`] });
       }
-      const details: any[] = await publicClient.multicall({ allowFailure: true, contracts: detailCalls });
+      const details: any[] = await mantleClient.multicall({ allowFailure: true, contracts: detailCalls });
 
       // WMNT price in USD, derived from the WMNT/USDC pool (used to value WMNT-side reserves).
       let wmntUsd = 0;
@@ -1928,13 +1934,15 @@ function PoolsTab({ walletClient, isConnected, address, allXStocks, publicClient
           priceUsd, tvlUsd, reserveA, reserveB, quoteIsUsd,
         });
       }
-      out.sort((a, b) => b.tvlUsd - a.tvlUsd);
-      setPools(out);
+      // Hide empty/dust pools (no real liquidity) for a cleaner list.
+      const visible = out.filter(p => p.tvlUsd >= 1);
+      visible.sort((a, b) => b.tvlUsd - a.tvlUsd);
+      setPools(visible);
     } catch (err: any) {
       setLoadError(err?.shortMessage || err?.message || "Failed to load pools");
     }
     setLoading(false);
-  }, [publicClient, catalogByAddr, baseByAddr]);
+  }, [catalogByAddr, baseByAddr]);
 
   useEffect(() => { discover(); }, [discover]);
 
@@ -1958,11 +1966,11 @@ function PoolsTab({ walletClient, isConnected, address, allXStocks, publicClient
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      if (!selected || !address || !publicClient) { setBalA(null); setBalB(null); return; }
+      if (!selected || !address) { setBalA(null); setBalB(null); return; }
       try {
         const [a, b] = await Promise.all([
-          publicClient.readContract({ address: selected.aAddress as `0x${string}`, abi: ERC20_BALANCE_ABI, functionName: "balanceOf", args: [address as `0x${string}`] }),
-          publicClient.readContract({ address: selected.bAddress as `0x${string}`, abi: ERC20_BALANCE_ABI, functionName: "balanceOf", args: [address as `0x${string}`] }),
+          mantleClient.readContract({ address: selected.aAddress as `0x${string}`, abi: ERC20_BALANCE_ABI, functionName: "balanceOf", args: [address as `0x${string}`] }),
+          mantleClient.readContract({ address: selected.bAddress as `0x${string}`, abi: ERC20_BALANCE_ABI, functionName: "balanceOf", args: [address as `0x${string}`] }),
         ]);
         if (!cancelled) {
           setBalA(Number(a as bigint) / 10 ** selected.aDecimals);
@@ -1972,7 +1980,7 @@ function PoolsTab({ walletClient, isConnected, address, allXStocks, publicClient
     };
     run();
     return () => { cancelled = true; };
-  }, [selected, address, publicClient]);
+  }, [selected, address]);
 
   const openPool = (key: string) => {
     setSelectedKey(prev => (prev === key ? null : key));
@@ -2006,7 +2014,7 @@ function PoolsTab({ walletClient, isConnected, address, allXStocks, publicClient
   };
 
   const ensureAllowance = async (token: string, owner: string, spender: string, needed: bigint) => {
-    const current = await publicClient.readContract({
+    const current = await mantleClient.readContract({
       address: token as `0x${string}`, abi: ERC20_ALLOWANCE_ABI, functionName: "allowance",
       args: [owner as `0x${string}`, spender as `0x${string}`],
     }) as bigint;
@@ -2015,11 +2023,11 @@ function PoolsTab({ walletClient, isConnected, address, allXStocks, publicClient
       address: token as `0x${string}`, abi: ERC20_APPROVE_ABI, functionName: "approve",
       args: [spender as `0x${string}`, MAX_UINT256],
     });
-    await publicClient.waitForTransactionReceipt({ hash, confirmations: 1 });
+    await mantleClient.waitForTransactionReceipt({ hash, confirmations: 1 });
   };
 
   const handleAddLiquidity = async () => {
-    if (!selected || !walletClient || !isConnected || !address || !publicClient) return;
+    if (!selected || !walletClient || !isConnected || !address) return;
     if (!amountA || !amountB || parseFloat(amountA) <= 0 || parseFloat(amountB) <= 0) return;
     setDepositing(true); setDepositStatus(null); setTxHash(null);
     try {
@@ -2035,7 +2043,7 @@ function PoolsTab({ walletClient, isConnected, address, allXStocks, publicClient
       if (selected.aIsXStock && selected.aWrapped) {
         setDepositStatus(`Approving ${selected.aSymbol} for wrapping…`);
         await ensureAllowance(selected.aAddress, address, selected.aWrapped, amountARaw);
-        const shares = await publicClient.readContract({
+        const shares = await mantleClient.readContract({
           address: selected.aWrapped as `0x${string}`, abi: ERC4626_ABI, functionName: "previewDeposit", args: [amountARaw],
         }) as bigint;
         setDepositStatus(`Wrapping ${selected.aSymbol}…`);
@@ -2043,7 +2051,7 @@ function PoolsTab({ walletClient, isConnected, address, allXStocks, publicClient
           address: selected.aWrapped as `0x${string}`, abi: ERC4626_ABI, functionName: "deposit",
           args: [amountARaw, address as `0x${string}`],
         });
-        await publicClient.waitForTransactionReceipt({ hash: wrapHash, confirmations: 1 });
+        await mantleClient.waitForTransactionReceipt({ hash: wrapHash, confirmations: 1 });
         poolAmountARaw = shares > BigInt(0) ? shares : amountARaw;
       }
 
@@ -2072,7 +2080,7 @@ function PoolsTab({ walletClient, isConnected, address, allXStocks, publicClient
         }],
       });
       setDepositStatus("Waiting for confirmation…");
-      await publicClient.waitForTransactionReceipt({ hash, confirmations: 1 });
+      await mantleClient.waitForTransactionReceipt({ hash, confirmations: 1 });
       setTxHash(hash);
       setDepositStatus("Liquidity added — position NFT minted to your wallet.");
       setAmountA(""); setAmountB("");
