@@ -80,7 +80,9 @@ function reducer(state: StockyState, action: Action): StockyState {
       : state;
     case "end_turn":     return { ...state, pending: null, pendingError: action.success ? null : (action.error ?? "Failed") };
     case "reset":        return { ...state, messages: [], pending: null, pendingError: null };
-    case "set_env":      return { ...state, xStockCount: action.xStockCount, hasWallet: action.hasWallet };
+    case "set_env":
+      if (state.xStockCount === action.xStockCount && state.hasWallet === action.hasWallet) return state;
+      return { ...state, xStockCount: action.xStockCount, hasWallet: action.hasWallet };
     default: return state;
   }
 }

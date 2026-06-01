@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
@@ -1007,17 +1008,17 @@ const XSTOCK_SWAP_HELPER = "0xe2c17E812f506e1A2723618e787eE61B9E30470f";
 const USDC_MANTLE = "0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9";
 const WMNT_ADDRESS = "0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8";
 
-interface SwapToken { symbol: string; address: string; decimals: number; logo?: string; }
+interface SwapToken { symbol: string; address: string; decimals: number; logo?: string; name?: string; }
 
 const NATIVE_MNT_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
 
 const BASE_TOKENS: SwapToken[] = [
-  { symbol: "MNT", address: NATIVE_MNT_ADDRESS, decimals: 18 },
-  { symbol: "USDC", address: "0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9", decimals: 6 },
-  { symbol: "WMNT", address: "0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8", decimals: 18 },
-  { symbol: "USDT", address: "0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE", decimals: 6 },
-  { symbol: "WETH", address: "0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111", decimals: 18 },
-  { symbol: "mETH", address: "0xcDA86A272531e8640cD7F1a92c01839911B90bb0", decimals: 18 },
+  { symbol: "MNT", address: NATIVE_MNT_ADDRESS, decimals: 18, logo: "/tokens/mnt.png", name: "Mantle" },
+  { symbol: "USDC", address: "0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9", decimals: 6, logo: "/tokens/usdc.png", name: "USD Coin" },
+  { symbol: "WMNT", address: "0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8", decimals: 18, logo: "/tokens/mnt.png", name: "Wrapped Mantle" },
+  { symbol: "USDT", address: "0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE", decimals: 6, logo: "/tokens/usdt.png", name: "Tether USD" },
+  { symbol: "WETH", address: "0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111", decimals: 18, logo: "/tokens/weth.png", name: "Wrapped Ether" },
+  { symbol: "mETH", address: "0xcDA86A272531e8640cD7F1a92c01839911B90bb0", decimals: 18, name: "Mantle Staked Ether" },
   // xStocks — original contract addresses from xStocks API (GET /public/assets, network: Mantle)
   { symbol: "SPYx", address: "0x90a2a4c76b5d8c0bc892a69ea28aa775a8f2dd48", decimals: 18 },
   { symbol: "NVDAx", address: "0xc845b2894dbddd03858fd2d643b4ef725fe0849d", decimals: 18 },
@@ -1106,6 +1107,138 @@ const FACTORY_GET_POOL_ABI = [{ inputs: [{ name: "tokenA", type: "address" }, { 
 const POOL_SLOT0_ABI = [{ inputs: [], name: "slot0", outputs: [{ name: "sqrtPriceX96", type: "uint160" }, { name: "tick", type: "int24" }, { name: "observationIndex", type: "uint16" }, { name: "observationCardinality", type: "uint16" }, { name: "observationCardinalityNext", type: "uint16" }, { name: "feeProtocol", type: "uint8" }, { name: "unlocked", type: "bool" }], stateMutability: "view", type: "function" }] as const;
 const SWAP_ROUTER_ABI = [{ inputs: [{ components: [{ name: "tokenIn", type: "address" }, { name: "tokenOut", type: "address" }, { name: "fee", type: "uint24" }, { name: "recipient", type: "address" }, { name: "deadline", type: "uint256" }, { name: "amountIn", type: "uint256" }, { name: "amountOutMinimum", type: "uint256" }, { name: "sqrtPriceLimitX96", type: "uint160" }], name: "params", type: "tuple" }], name: "exactInputSingle", outputs: [{ name: "amountOut", type: "uint256" }], stateMutability: "payable", type: "function" }] as const;
 
+// Deterministic gradient per symbol so fallback monograms look intentional, not random.
+const ICON_GRADIENTS = [
+  "from-blue-500 to-indigo-600", "from-emerald-500 to-teal-600", "from-fuchsia-500 to-purple-600",
+  "from-amber-500 to-orange-600", "from-rose-500 to-pink-600", "from-cyan-500 to-sky-600",
+  "from-violet-500 to-blue-600", "from-lime-500 to-emerald-600",
+];
+function gradientFor(symbol: string): string {
+  let h = 0;
+  for (let i = 0; i < symbol.length; i++) h = (h * 31 + symbol.charCodeAt(i)) >>> 0;
+  return ICON_GRADIENTS[h % ICON_GRADIENTS.length];
+}
+
+function TokenIcon({ token, size = 28 }: { token: { symbol: string; logo?: string }; size?: number }) {
+  const [failed, setFailed] = useState(false);
+  const dim = { width: size, height: size };
+  if (token.logo && !failed) {
+    return (
+      <img
+        src={token.logo}
+        alt={token.symbol}
+        style={dim}
+        className="rounded-full bg-white/10 object-cover shrink-0"
+        onError={() => setFailed(true)}
+        loading="lazy"
+      />
+    );
+  }
+  const label = token.symbol.replace(/x$/, "").slice(0, 3).toUpperCase();
+  return (
+    <div
+      style={dim}
+      className={`shrink-0 rounded-full bg-gradient-to-br ${gradientFor(token.symbol)} flex items-center justify-center font-bold text-white shadow-inner`}
+    >
+      <span style={{ fontSize: Math.max(8, Math.round(size * 0.34)) }}>{label}</span>
+    </div>
+  );
+}
+
+// Stable, module-scope token picker rendered through a portal so parent re-renders
+// (e.g. the 5s LiveBrief tick) never remount it — keeping search focus & scroll intact.
+function TokenSelectorModal({
+  open, onClose, tokens, onSelect, search, setSearch, customAddress, setCustomAddress, onAddCustom, excludeAddress, selectedAddress,
+}: {
+  open: boolean;
+  onClose: () => void;
+  tokens: SwapToken[];
+  onSelect: (t: SwapToken) => void;
+  search: string;
+  setSearch: (v: string) => void;
+  customAddress: string;
+  setCustomAddress: (v: string) => void;
+  onAddCustom: () => void;
+  excludeAddress?: string;
+  selectedAddress?: string;
+}) {
+  const [mounted, setMounted] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const id = window.setTimeout(() => searchRef.current?.focus(), 30);
+    return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = prevOverflow; window.clearTimeout(id); };
+  }, [open, onClose]);
+
+  if (!open || !mounted) return null;
+
+  const list = tokens.filter(t => t.address.toLowerCase() !== (excludeAddress || "").toLowerCase());
+  const validCustom = customAddress.length === 42 && customAddress.startsWith("0x");
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full sm:w-[420px] sm:max-w-[calc(100vw-2rem)] max-h-[85vh] sm:max-h-[600px] flex flex-col bg-[#0d1220] border border-white/10 rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden animate-[slideUp_.18s_ease-out]">
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-white/5">
+          <h3 className="text-sm font-semibold text-white/90">Select a token</h3>
+          <button onClick={onClose} aria-label="Close" className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-white/80 hover:bg-white/10 transition-colors">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+          </button>
+        </div>
+        {/* Search */}
+        <div className="px-4 py-3 border-b border-white/5">
+          <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 focus-within:border-blue-500/40 transition-colors">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" className="text-white/30 shrink-0"><circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.6"/><path d="M11 11l3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>
+            <input ref={searchRef} type="text" placeholder="Search name or paste address…" value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="flex-1 bg-transparent text-sm text-white/90 placeholder:text-white/30 focus:outline-none" />
+            {search && <button onClick={() => setSearch("")} aria-label="Clear" className="text-white/30 hover:text-white/70"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg></button>}
+          </div>
+        </div>
+        {/* List */}
+        <div className="flex-1 overflow-y-auto overscroll-contain">
+          {list.length === 0 ? (
+            <div className="px-4 py-10 text-center text-xs text-white/40">No tokens found{validCustom ? "" : ". Paste a contract address below."}</div>
+          ) : list.map((t, i) => {
+            const selected = t.address.toLowerCase() === (selectedAddress || "").toLowerCase();
+            return (
+              <button key={t.address + i} onClick={() => onSelect(t)}
+                className={`w-full px-4 py-2.5 flex items-center gap-3 text-left transition-colors ${selected ? "bg-blue-500/10" : "hover:bg-white/5"}`}>
+                <TokenIcon token={t} size={32} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-white/90 flex items-center gap-2">
+                    {t.symbol}
+                    {selected && <span className="text-[9px] font-medium text-blue-300 bg-blue-500/15 px-1.5 py-0.5 rounded-full">Selected</span>}
+                  </div>
+                  <div className="text-[11px] text-white/40 truncate">{t.name || `${t.address.slice(0, 10)}…${t.address.slice(-6)}`}</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        {/* Custom token */}
+        <div className="px-4 py-3 border-t border-white/5 bg-white/[0.02]">
+          <div className="text-[10px] uppercase tracking-wide text-white/40 mb-1.5">Import by address</div>
+          <div className="flex gap-2">
+            <input type="text" placeholder="0x…" value={customAddress} onChange={e => setCustomAddress(e.target.value)}
+              className="flex-1 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-xs text-white/80 placeholder:text-white/25 focus:outline-none focus:border-blue-500/40" />
+            <button onClick={onAddCustom} disabled={!validCustom}
+              className="px-3.5 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-blue-500 transition-colors">Import</button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient }: { walletClient: any; isConnected: boolean; address: string | undefined; allXStocks: XStockAsset[]; publicClient: any }) {
   const [inputAmount, setInputAmount] = useState("");
   const [outputAmount, setOutputAmount] = useState("");
@@ -1125,19 +1258,38 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
 
   // Build full token list: base tokens + remaining xStocks from JSON (skip those already in BASE_TOKENS)
   const allTokens: SwapToken[] = useMemo(() => {
+    // Lookup logos from the xStocks catalog by address + symbol so base tokens
+    // that duplicate an xStock (SPYx, NVDAx, AAPLx, ...) still show a real logo.
+    const logoByAddr = new Map<string, string>();
+    const logoBySymbol = new Map<string, string>();
+    const nameByAddr = new Map<string, string>();
+    const nameBySymbol = new Map<string, string>();
+    for (const s of allXStocks) {
+      if (s.logo) { logoByAddr.set(s.mantleAddress.toLowerCase(), s.logo); logoBySymbol.set(s.symbol.toLowerCase(), s.logo); }
+      if (s.name) { nameByAddr.set(s.mantleAddress.toLowerCase(), s.name); nameBySymbol.set(s.symbol.toLowerCase(), s.name); }
+    }
     const baseAddrs = new Set(BASE_TOKENS.map(t => t.address.toLowerCase()));
+    const baseTokens: SwapToken[] = BASE_TOKENS.map(t => ({
+      ...t,
+      logo: t.logo || logoByAddr.get(t.address.toLowerCase()) || logoBySymbol.get(t.symbol.toLowerCase()),
+      name: t.name || nameByAddr.get(t.address.toLowerCase()) || nameBySymbol.get(t.symbol.toLowerCase()),
+    }));
     const xstockTokens: SwapToken[] = allXStocks
       .filter(s => !baseAddrs.has(s.mantleAddress.toLowerCase()))
       .map(s => ({
-        symbol: s.symbol, address: s.mantleAddress, decimals: 18, logo: s.logo,
+        symbol: s.symbol, address: s.mantleAddress, decimals: 18, logo: s.logo, name: s.name,
       }));
-    return [...BASE_TOKENS, ...xstockTokens];
+    return [...baseTokens, ...xstockTokens];
   }, [allXStocks]);
 
   const filteredTokens = useMemo(() => {
-    if (!tokenSearch) return allTokens.slice(0, 50);
+    if (!tokenSearch) return allTokens;
     const q = tokenSearch.toLowerCase();
-    return allTokens.filter(t => t.symbol.toLowerCase().includes(q) || t.address.toLowerCase().includes(q)).slice(0, 50);
+    return allTokens.filter(t =>
+      t.symbol.toLowerCase().includes(q) ||
+      t.address.toLowerCase().includes(q) ||
+      (t.name || "").toLowerCase().includes(q)
+    );
   }, [allTokens, tokenSearch]);
 
   // Fetch token balances
@@ -1400,38 +1552,12 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
     }
   };
 
-  const TokenSelector = ({ side, show }: { side: "input" | "output"; show: boolean }) => {
-    if (!show) return null;
-    const otherToken = side === "input" ? outputToken : inputToken;
-    return (
-      <div className={`absolute right-0 z-50 w-72 bg-[#0d1220] border border-white/10 rounded-xl overflow-hidden shadow-2xl ${side === "output" ? "bottom-full mb-1" : "top-full mt-1"}`}>
-        <div className="p-3 border-b border-white/5">
-          <input type="text" placeholder="Search token or paste address..." value={tokenSearch} onChange={e => setTokenSearch(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-xs text-white/80 placeholder:text-white/30 focus:outline-none focus:border-blue-500/30" autoFocus />
-        </div>
-        <div className="max-h-64 overflow-y-auto">
-          {filteredTokens.filter(t => t.address.toLowerCase() !== otherToken.address.toLowerCase()).map((t, i) => (
-            <button key={t.address + i} onClick={() => selectToken(t, side)}
-              className="w-full px-4 py-2.5 flex items-center gap-3 text-left hover:bg-white/5 transition-colors border-b border-white/[0.02]">
-              {t.logo ? <img src={t.logo} className="w-6 h-6 rounded-full bg-white/5" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} /> :
-                <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center text-[8px] font-bold text-blue-400">{t.symbol.slice(0, 2)}</div>}
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold text-white/80">{t.symbol}</div>
-                <div className="text-[9px] text-white/30 truncate">{t.address.slice(0, 10)}...{t.address.slice(-6)}</div>
-              </div>
-            </button>
-          ))}
-        </div>
-        <div className="p-3 border-t border-white/5">
-          <div className="text-[9px] text-white/40 mb-1.5">Custom token address</div>
-          <div className="flex gap-2">
-            <input type="text" placeholder="0x..." value={customAddress} onChange={e => setCustomAddress(e.target.value)}
-              className="flex-1 px-2 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[10px] text-white/70 placeholder:text-white/20 focus:outline-none" />
-            <button onClick={() => addCustomToken(side)} className="px-2 py-1.5 rounded-lg bg-blue-600/20 text-blue-400 text-[10px] font-semibold border border-blue-500/20 hover:bg-blue-600/30">Add</button>
-          </div>
-        </div>
-      </div>
-    );
+  const selectorSide: "input" | "output" | null = showInputSelect ? "input" : showOutputSelect ? "output" : null;
+  const closeSelector = useCallback(() => { setShowInputSelect(false); setShowOutputSelect(false); setTokenSearch(""); }, []);
+  const openSelector = (side: "input" | "output") => {
+    setTokenSearch(""); setCustomAddress("");
+    if (side === "input") { setShowInputSelect(true); setShowOutputSelect(false); }
+    else { setShowOutputSelect(true); setShowInputSelect(false); }
   };
 
   return (
@@ -1462,17 +1588,14 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
                 </span>
               </div>
               <div className="flex items-center gap-3">
-                <input type="text" placeholder="0.0" value={inputAmount} onChange={(e) => setInputAmount(e.target.value.replace(/[^0-9.]/g, ""))}
-                  className="flex-1 bg-transparent text-2xl font-bold text-white/90 placeholder:text-white/20 focus:outline-none" />
-                <div className="relative">
-                  <button onClick={() => { setShowInputSelect(!showInputSelect); setShowOutputSelect(false); setTokenSearch(""); }}
-                    className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-sm font-semibold text-white/70 flex items-center gap-1.5 hover:bg-white/10 transition-all">
-                    {inputToken.logo ? <img src={inputToken.logo} className="w-5 h-5 rounded-full bg-white/5" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-5 h-5 rounded-full bg-blue-500/20 flex items-center justify-center text-[8px] font-bold text-blue-400">{inputToken.symbol[0]}</div>}
-                    {inputToken.symbol.length > 8 ? inputToken.symbol.slice(0, 8) + ".." : inputToken.symbol}
-                    <svg width="8" height="8" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-                  </button>
-                  <TokenSelector side="input" show={showInputSelect} />
-                </div>
+                <input type="text" inputMode="decimal" placeholder="0.0" value={inputAmount} onChange={(e) => setInputAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+                  className="flex-1 min-w-0 bg-transparent text-2xl font-bold text-white/90 placeholder:text-white/20 focus:outline-none" />
+                <button onClick={() => openSelector("input")}
+                  className="shrink-0 pl-1.5 pr-2.5 py-1.5 rounded-full bg-white/5 border border-white/10 text-sm font-semibold text-white/90 flex items-center gap-1.5 hover:bg-white/10 transition-all">
+                  <TokenIcon token={inputToken} size={24} />
+                  {inputToken.symbol.length > 8 ? inputToken.symbol.slice(0, 8) + ".." : inputToken.symbol}
+                  <svg width="9" height="9" viewBox="0 0 16 16" fill="none" className="text-white/50"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                </button>
               </div>
             </div>
 
@@ -1491,16 +1614,13 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
               </div>
               <div className="flex items-center gap-3">
                 <input type="text" placeholder="0.0" value={quoting ? "..." : outputAmount} readOnly
-                  className="flex-1 bg-transparent text-2xl font-bold text-white/90 placeholder:text-white/20 focus:outline-none" />
-                <div className="relative">
-                  <button onClick={() => { setShowOutputSelect(!showOutputSelect); setShowInputSelect(false); setTokenSearch(""); }}
-                    className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-sm font-semibold text-white/70 flex items-center gap-1.5 hover:bg-white/10 transition-all">
-                    {outputToken.logo ? <img src={outputToken.logo} className="w-5 h-5 rounded-full bg-white/5" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center text-[8px] font-bold text-emerald-400">{outputToken.symbol[0]}</div>}
-                    {outputToken.symbol.length > 8 ? outputToken.symbol.slice(0, 8) + ".." : outputToken.symbol}
-                    <svg width="8" height="8" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-                  </button>
-                  <TokenSelector side="output" show={showOutputSelect} />
-                </div>
+                  className="flex-1 min-w-0 bg-transparent text-2xl font-bold text-white/90 placeholder:text-white/20 focus:outline-none" />
+                <button onClick={() => openSelector("output")}
+                  className="shrink-0 pl-1.5 pr-2.5 py-1.5 rounded-full bg-white/5 border border-white/10 text-sm font-semibold text-white/90 flex items-center gap-1.5 hover:bg-white/10 transition-all">
+                  <TokenIcon token={outputToken} size={24} />
+                  {outputToken.symbol.length > 8 ? outputToken.symbol.slice(0, 8) + ".." : outputToken.symbol}
+                  <svg width="9" height="9" viewBox="0 0 16 16" fill="none" className="text-white/50"><path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                </button>
               </div>
             </div>
           </div>
@@ -1569,7 +1689,19 @@ function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient 
         </div>
       </div>
 
-
+      <TokenSelectorModal
+        open={selectorSide !== null}
+        onClose={closeSelector}
+        tokens={filteredTokens}
+        onSelect={(t) => selectorSide && selectToken(t, selectorSide)}
+        search={tokenSearch}
+        setSearch={setTokenSearch}
+        customAddress={customAddress}
+        setCustomAddress={setCustomAddress}
+        onAddCustom={() => selectorSide && addCustomToken(selectorSide)}
+        excludeAddress={selectorSide === "input" ? outputToken.address : selectorSide === "output" ? inputToken.address : undefined}
+        selectedAddress={selectorSide === "input" ? inputToken.address : selectorSide === "output" ? outputToken.address : undefined}
+      />
     </div>
   );
 }
