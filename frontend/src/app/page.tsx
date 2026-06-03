@@ -8,6 +8,7 @@ import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useBalance, useWalletClient, usePublicClient } from "wagmi";
 import { formatEther, encodeFunctionData } from "viem";
 import dynamic from "next/dynamic";
+import { adaptViemWallet } from "@reservoir0x/relay-sdk";
 import { StockyFloatingButton } from "@/components/concierge/StockyFloatingButton";
 import { StockyPanel } from "@/components/concierge/StockyPanel";
 import { LiveAnalyticsBanner } from "@/components/concierge/LiveAnalyticsBanner";
@@ -1901,7 +1902,6 @@ function BridgeTab({ walletClient, onConnectWallet }: { walletClient: any; onCon
   const adaptedWallet = useMemo(() => {
     if (!walletClient) return undefined;
     try {
-      const { adaptViemWallet } = require("@reservoir0x/relay-sdk");
       return adaptViemWallet(walletClient);
     } catch { return undefined; }
   }, [walletClient]);

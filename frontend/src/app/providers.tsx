@@ -94,15 +94,15 @@ const darkRelayTheme = {
 };
 
 function RelayChainLoader({ children }: { children: ReactNode }) {
-  const { data: chainsData, viemChains } = useRelayChains(MAINNET_RELAY_API);
+  const { chains: allChains, viemChains } = useRelayChains(MAINNET_RELAY_API);
   const [wagmiConfig, setWagmiConfig] = useState<ReturnType<typeof createConfig> | undefined>();
 
   const relayChains = useMemo(() => {
-    if (!chainsData?.chains) return undefined;
-    return chainsData.chains.filter(
+    if (!allChains) return undefined;
+    return allChains.filter(
       (c: any) => !c.disabled && c.vmType === "evm"
     );
-  }, [chainsData]);
+  }, [allChains]);
 
   useEffect(() => {
     if (!wagmiConfig && viemChains && viemChains.length > 0) {
