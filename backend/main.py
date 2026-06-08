@@ -1,5 +1,6 @@
 """StockPilot AI — FastAPI Backend for AI-powered xStocks portfolio management on Mantle."""
 
+import asyncio
 import os
 import logging
 from contextlib import asynccontextmanager
@@ -8,15 +9,79 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from web3 import Web3
 
 from xstocks_api.client import XStocksClient
 from fluxion.client import FluxionClient
 from agent.ai_engine import AIEngine
-from agent.portfolio_agent import PortfolioAgent, AVAILABLE_STRATEGIES
+from agent.portfolio_agent import PortfolioAgent, AVAILABLE_STRATEGIES, YIELD_STRATEGIES
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# --- On-chain config for recording RWA yield decisions ---
+MANTLE_RPC_URL = os.getenv("MANTLE_RPC_URL", "https://rpc.mantle.xyz")
+STOCKPILOT_CONTRACT_ADDRESS = os.getenv(
+    "STOCKPILOT_CONTRACT_ADDRESS", "0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9"
+)
+AGENT_PRIVATE_KEY = os.getenv("AGENT_PRIVATE_KEY") or os.getenv("DEPLOYER_PRIVATE_KEY")
+
+# Minimal ABI for the on-chain yield-decision recorder.
+RECORD_YIELD_ABI = [
+    {
+        "name": "recordYieldDecision",
+        "type": "function",
+        "inputs": [
+            {"type": "uint8", "name": "usdyPct"},
+            {"type": "uint8", "name": "stocksPct"},
+            {"type": "string", "name": "reason"},
+            {"type": "uint256", "name": "usdyYieldBps"},
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable",
+    }
+]
+
+
+def _record_yield_decision_onchain(decision: dict) -> str | None:
+    """Record a yield decision on-chain via recordYieldDecision. Returns tx hash or None.
+
+    Sync web3 signing/sending — call via asyncio.to_thread. Never raises: any
+    failure (missing key, RPC down, revert) is logged and returns None so the
+    endpoint still returns the decision.
+    """
+    if not AGENT_PRIVATE_KEY:
+        logger.warning("No AGENT_PRIVATE_KEY/DEPLOYER_PRIVATE_KEY set — skipping on-chain record")
+        return None
+    try:
+        w3 = Web3(Web3.HTTPProvider(MANTLE_RPC_URL, request_kwargs={"timeout": 15}))
+        acct = w3.eth.account.from_key(AGENT_PRIVATE_KEY)
+        contract = w3.eth.contract(
+            address=Web3.to_checksum_address(STOCKPILOT_CONTRACT_ADDRESS),
+            abi=RECORD_YIELD_ABI,
+        )
+        usdy_yield_bps = int(round(float(decision.get("usdy_yield_pct", 0.0)) * 100))
+        tx = contract.functions.recordYieldDecision(
+            int(decision["usdy_pct"]),
+            int(decision["stocks_pct"]),
+            decision["reason"],
+            usdy_yield_bps,
+        ).build_transaction({
+            "from": acct.address,
+            "nonce": w3.eth.get_transaction_count(acct.address),
+            "chainId": 5000,
+            "gas": 500_000,
+            "gasPrice": w3.eth.gas_price,
+        })
+        signed = acct.sign_transaction(tx)
+        # web3.py v6 exposes `rawTransaction`; v7 renamed it to `raw_transaction`.
+        raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
+        tx_hash = w3.eth.send_raw_transaction(raw)
+        return tx_hash.hex()
+    except Exception as e:  # noqa: BLE001 - on-chain failures must not crash the endpoint
+        logger.error("On-chain recordYieldDecision failed: %s", e)
+        return None
 
 # Global instances
 xstocks_client: XStocksClient | None = None
@@ -68,6 +133,10 @@ class DepositRequest(BaseModel):
 
 class StrategyRequest(BaseModel):
     strategy: str
+
+
+class RwaStrategyRequest(BaseModel):
+    wallet_address: str | None = None
 
 
 class ExecuteRequest(BaseModel):
@@ -191,8 +260,39 @@ async def list_strategies():
     """List available trading strategies."""
     return {
         "strategies": list(AVAILABLE_STRATEGIES.keys()),
+        "yield_strategies": list(YIELD_STRATEGIES.keys()),
         "current": agent.state.strategy_name if agent else None,
     }
+
+
+@app.post("/api/strategy/rwa_balanced")
+async def run_rwa_strategy(req: RwaStrategyRequest):
+    """Run the RWA Balanced (AI Yield Optimizer) strategy.
+
+    1. Reads the live USDY yield from the Ondo Oracle on Mantle.
+    2. Gets ELFA market sentiment for the portfolio's top xStocks.
+    3. Decides the USDY/xStocks allocation split.
+    4. Records the decision on-chain via recordYieldDecision.
+    5. Returns the decision plus the on-chain tx hash (null if unavailable).
+    """
+    if not agent:
+        raise HTTPException(500, "Agent not initialized")
+    try:
+        decision = await agent.run_yield_strategy(
+            "rwa_balanced", wallet_address=req.wallet_address
+        )
+        if "error" in decision:
+            raise HTTPException(400, decision["error"])
+
+        # Record on-chain (best-effort: returns None if no signer / RPC issue).
+        tx_hash = await asyncio.to_thread(_record_yield_decision_onchain, decision)
+
+        return {**decision, "tx_hash": tx_hash}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"RWA strategy error: {e}")
+        raise HTTPException(500, str(e))
 
 
 @app.get("/api/history")
