@@ -5,7 +5,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useBalance, useWalletClient, usePublicClient } from "wagmi";
-import { formatEther, encodeFunctionData } from "viem";
+import { formatEther, encodeFunctionData, createPublicClient, http } from "viem";
+import { mantle } from "viem/chains";
 import dynamic from "next/dynamic";
 import { StockyFloatingButton } from "@/components/concierge/StockyFloatingButton";
 import { StockyPanel } from "@/components/concierge/StockyPanel";
@@ -36,7 +37,11 @@ const BRIDGE_DEFAULT_TO = {
   logoURI: "https://ethereum-optimism.github.io/data/USDC/logo.png",
 };
 
-const CONTRACT = "0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9";
+const CONTRACT = "0x4B02803c9Dd65dDc97Cc78530aB61281A442587F";
+// RWA / AI Yield Optimizer (USDY) — Mantle Mainnet addresses
+const USDY_ORACLE = "0xA96abbe61AfEdEB0D14a20440Ae7100D9aB4882f";
+const USDY_TOKEN = "0x5bE26527e817998A7206475496fDE1E68957c5A6";
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 const NANSEN_API_KEY = process.env.NEXT_PUBLIC_NANSEN_API_KEY || "";
 const ELFA_API_KEY = process.env.NEXT_PUBLIC_ELFA_API_KEY || "";
 const ALTLLM_API_KEY = process.env.NEXT_PUBLIC_ALTLLM_API_KEY || "";
@@ -177,13 +182,14 @@ const DEMO_ELFA: ElfaTrending[] = [
   { token: "SOL", current_count: 105, change_percent: 15.38 },
 ];
 
-type TabId = "market" | "swap" | "pools" | "bridge" | "dashboard" | "stocky" | "education";
+type TabId = "market" | "swap" | "pools" | "bridge" | "rwa" | "dashboard" | "stocky" | "education";
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "market", label: "Market", icon: "M2 12L5 7L8 9L11 4L14 8" },
   { id: "swap", label: "Swap", icon: "M4 8h8M8 4v8" },
   { id: "pools", label: "Pools", icon: "M8 2a6 6 0 100 12A6 6 0 008 2z" },
   { id: "bridge", label: "Bridge", icon: "M2 8h12M10 4l4 4-4 4" },
+  { id: "rwa", label: "RWA Strategy", icon: "M2 13h12M4 13V7M7 13V4M10 13V8M13 13V5" },
   { id: "dashboard", label: "Dashboard", icon: "M3 3h4v8H3zM9 3h4v4H9zM9 9h4v4H9z" },
   { id: "stocky", label: "Stocky", icon: "M8 1L8 15M1 8L15 8" },
   { id: "education", label: "Education", icon: "M8 1L1 5l7 4 7-4-7-4zM1 9l7 4 7-4" },
@@ -606,6 +612,11 @@ export default function Home() {
           {activeTab === "bridge" && (
             <motion.div key="bridge" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
               <BridgeTab walletClient={walletClient} onConnectWallet={() => {}} />
+            </motion.div>
+          )}
+          {activeTab === "rwa" && (
+            <motion.div key="rwa" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
+              <RwaStrategyTab />
             </motion.div>
           )}
           {activeTab === "dashboard" && (
@@ -1758,6 +1769,229 @@ function PoolsTab({ walletClient, isConnected, address, allXStocks }: { walletCl
   );
 }
 
+
+/* ========== RWA STRATEGY TAB ========== */
+// --- RWA / AI Yield Optimizer ABIs ---
+const ORACLE_GET_PRICE_ABI = [{ inputs: [], name: "getPrice", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" }] as const;
+const YIELD_DECISION_TUPLE = { name: "", type: "tuple", components: [{ name: "usdyPct", type: "uint8" }, { name: "stocksPct", type: "uint8" }, { name: "reason", type: "string" }, { name: "usdyYieldBps", type: "uint256" }, { name: "timestamp", type: "uint256" }] } as const;
+const RWA_CONTRACT_ABI = [
+  { inputs: [], name: "getYieldDecisionCount", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" },
+  { inputs: [{ name: "limit", type: "uint256" }], name: "getRecentYieldDecisions", outputs: [{ ...YIELD_DECISION_TUPLE, type: "tuple[]" }], stateMutability: "view", type: "function" },
+] as const;
+
+type YieldDecisionRow = { usdyPct: number; stocksPct: number; reason: string; usdyYieldBps: bigint; timestamp: bigint };
+type RwaDecision = { usdy_pct: number; stocks_pct: number; reason: string; usdy_yield_pct: number; sentiment_score: number; tx_hash: string | null };
+
+// Dedicated read-only Mantle client — independent of the connected wallet's
+// active chain (usePublicClient() defaults to the first config chain, not Mantle).
+const MANTLE_RPC = process.env.NEXT_PUBLIC_MANTLE_RPC_URL || "https://rpc.mantle.xyz";
+const mantleClient = createPublicClient({ chain: mantle, transport: http(MANTLE_RPC) });
+
+function RwaStrategyTab() {
+  const publicClient = mantleClient;
+  const [usdyYield, setUsdyYield] = useState<number | null>(null);
+  const [yieldLoading, setYieldLoading] = useState(true);
+  const [history, setHistory] = useState<YieldDecisionRow[]>([]);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<RwaDecision | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadYield = async (pc: any) => {
+    if (!pc) return;
+    setYieldLoading(true);
+    try {
+      const price = await pc.readContract({ address: USDY_ORACLE as `0x${string}`, abi: ORACLE_GET_PRICE_ABI, functionName: "getPrice" }) as bigint;
+      setUsdyYield((Number(price) / 1e18 - 1.0) * 100);
+    } catch (e) {
+      console.error("USDY oracle read failed:", e);
+      setUsdyYield(null);
+    } finally {
+      setYieldLoading(false);
+    }
+  };
+
+  const loadHistory = async (pc: any) => {
+    if (!pc) return;
+    try {
+      const rows = await pc.readContract({ address: CONTRACT as `0x${string}`, abi: RWA_CONTRACT_ABI, functionName: "getRecentYieldDecisions", args: [BigInt(10)] }) as readonly YieldDecisionRow[];
+      setHistory(rows.map((r) => ({ usdyPct: Number(r.usdyPct), stocksPct: Number(r.stocksPct), reason: r.reason, usdyYieldBps: r.usdyYieldBps, timestamp: r.timestamp })));
+    } catch (e) {
+      // Old contract without yield functions, or empty history — non-fatal.
+      console.warn("Yield history unavailable:", e);
+      setHistory([]);
+    }
+  };
+
+  // Depend on a stable boolean: usePublicClient returns a fresh client object
+  // every render, so depending on its identity would loop infinitely.
+  const clientReady = Boolean(publicClient);
+  useEffect(() => {
+    if (!publicClient) return;
+    loadYield(publicClient);
+    loadHistory(publicClient);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientReady]);
+
+  const runAgent = async () => {
+    setRunning(true);
+    setError(null);
+    setResult(null);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/strategy/rwa_balanced`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) throw new Error(`Backend HTTP ${res.status}`);
+      const data = (await res.json()) as RwaDecision;
+      setResult(data);
+      loadHistory(publicClient);
+    } catch (e: any) {
+      setError(e?.message || "Failed to reach the AI agent backend");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const latest = result
+    ? { usdyPct: result.usdy_pct, stocksPct: result.stocks_pct }
+    : history.length > 0
+    ? { usdyPct: history[0].usdyPct, stocksPct: history[0].stocksPct }
+    : null;
+  const sentiment = result?.sentiment_score ?? null;
+  const pieData = latest ? [{ name: "USDY", value: latest.usdyPct }, { name: "xStocks", value: latest.stocksPct }] : [];
+
+  return (
+    <div className="max-w-5xl mx-auto px-4">
+      <div className="text-center mb-6">
+        <h2 className="text-xl font-bold mb-1">AI Yield Optimizer</h2>
+        <p className="text-xs text-white/40">Dynamic allocation between USDY (tokenized US Treasuries) and xStocks, driven by on-chain yield + market sentiment</p>
+      </div>
+
+      {/* Block 1 — Current Status */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+        {/* USDY yield card */}
+        <div className="p-4 rounded-xl border border-emerald-500/15 bg-emerald-500/[0.04]">
+          <div className="text-[10px] uppercase tracking-wide text-emerald-400/70 mb-1">USDY Yield</div>
+          <div className="text-2xl font-bold text-emerald-400">
+            {yieldLoading ? <span className="text-white/30 text-base">Loading…</span> : usdyYield !== null ? `${usdyYield.toFixed(2)}%` : <span className="text-white/40 text-base">Unavailable</span>}
+          </div>
+          <a href={`https://mantlescan.xyz/address/${USDY_ORACLE}`} target="_blank" rel="noreferrer" className="mt-2 inline-block text-[9px] font-mono text-emerald-400/60 hover:text-emerald-400 break-all">Oracle: {USDY_ORACLE.slice(0, 10)}…</a>
+        </div>
+        {/* Allocation card */}
+        <div className="p-4 rounded-xl border border-blue-500/15 bg-blue-500/[0.04]">
+          <div className="text-[10px] uppercase tracking-wide text-blue-400/70 mb-1">Current Allocation</div>
+          {latest ? (
+            <>
+              <div className="text-2xl font-bold text-white/90">{latest.usdyPct}<span className="text-sm text-white/40"> / </span>{latest.stocksPct}<span className="text-sm text-white/40">%</span></div>
+              <div className="text-[9px] text-white/40 mt-1">USDY / xStocks</div>
+            </>
+          ) : (
+            <div className="text-base text-white/40 pt-1">No decision yet</div>
+          )}
+        </div>
+        {/* Sentiment card */}
+        <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02]">
+          <div className="text-[10px] uppercase tracking-wide text-white/40 mb-1">Market Sentiment</div>
+          {sentiment !== null ? (
+            <div className={`text-2xl font-bold ${sentiment > 0 ? "text-emerald-400" : sentiment < 0 ? "text-red-400" : "text-white/70"}`}>{sentiment > 0 ? "+" : ""}{sentiment.toFixed(2)}</div>
+          ) : (
+            <div className="text-base text-white/40 pt-1">Run agent →</div>
+          )}
+          <div className="text-[9px] text-white/40 mt-1">ELFA score (-1 … +1)</div>
+        </div>
+      </div>
+
+      {/* Allocation chart */}
+      {latest && (
+        <div className="mb-5 p-4 rounded-xl border border-white/5 bg-white/[0.015] flex items-center gap-4">
+          <div className="w-24 h-24 shrink-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={pieData} dataKey="value" innerRadius={26} outerRadius={44} paddingAngle={2} stroke="none">
+                  <Cell fill="#10b981" />
+                  <Cell fill="#3b82f6" />
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="flex-1 space-y-1.5">
+            <div className="flex items-center gap-2 text-xs"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" /><span className="text-white/70">USDY (stable yield)</span><span className="ml-auto font-bold text-white/90">{latest.usdyPct}%</span></div>
+            <div className="flex items-center gap-2 text-xs"><span className="w-2.5 h-2.5 rounded-sm bg-blue-500" /><span className="text-white/70">xStocks (growth)</span><span className="ml-auto font-bold text-white/90">{latest.stocksPct}%</span></div>
+          </div>
+        </div>
+      )}
+
+      {/* Block 2 — Run Agent */}
+      <div className="mb-5 p-4 rounded-xl border border-white/5 bg-white/[0.015]">
+        <button onClick={runAgent} disabled={running} className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-semibold transition-all">
+          {running ? "Agent is analyzing…" : "Analyze & Decide"}
+        </button>
+        {error && (
+          <div className="mt-3 p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-[11px] text-red-300">
+            {error}. The AI backend must be running and reachable at <span className="font-mono">{BACKEND_URL}</span>.
+          </div>
+        )}
+        {result && (
+          <div className="mt-3 p-3 rounded-lg bg-white/[0.03] border border-white/5">
+            <div className="text-xs text-white/80 leading-relaxed mb-2">{result.reason}</div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-white/50">
+              <span>USDY yield: <span className="text-emerald-400 font-semibold">{result.usdy_yield_pct.toFixed(2)}%</span></span>
+              <span>Split: <span className="text-white/80 font-semibold">{result.usdy_pct}% / {result.stocks_pct}%</span></span>
+              {result.tx_hash ? (
+                <a href={`https://mantlescan.xyz/tx/${result.tx_hash}`} target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300">View on-chain tx ↗</a>
+              ) : (
+                <span className="text-amber-400/70">Not recorded on-chain (no signer)</span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Block 3 — Decision History */}
+      <div className="p-4 rounded-xl border border-white/5 bg-white/[0.015]">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-white/80">Decision History</h3>
+          <a href={`https://mantlescan.xyz/address/${CONTRACT}`} target="_blank" rel="noreferrer" className="text-[9px] font-mono text-blue-400/70 hover:text-blue-400">{CONTRACT.slice(0, 10)}…</a>
+        </div>
+        {history.length === 0 ? (
+          <div className="text-xs text-white/30 py-6 text-center">No on-chain decisions recorded yet. Run the agent to create the first one.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left min-w-[520px]">
+              <thead>
+                <tr className="text-[9px] uppercase tracking-wide text-white/30 border-b border-white/5">
+                  <th className="py-2 pr-3 font-medium">Time</th>
+                  <th className="py-2 pr-3 font-medium">USDY</th>
+                  <th className="py-2 pr-3 font-medium">xStocks</th>
+                  <th className="py-2 pr-3 font-medium">Yield</th>
+                  <th className="py-2 font-medium">Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((row, i) => (
+                  <tr key={i} className="border-b border-white/[0.03] text-[11px]">
+                    <td className="py-2 pr-3 text-white/50 whitespace-nowrap">{new Date(Number(row.timestamp) * 1000).toLocaleDateString()} {new Date(Number(row.timestamp) * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td>
+                    <td className="py-2 pr-3 text-emerald-400 font-semibold">{row.usdyPct}%</td>
+                    <td className="py-2 pr-3 text-blue-400 font-semibold">{row.stocksPct}%</td>
+                    <td className="py-2 pr-3 text-white/60">{(Number(row.usdyYieldBps) / 100).toFixed(2)}%</td>
+                    <td className="py-2 text-white/60 max-w-[260px] truncate" title={row.reason}>{row.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 flex items-center justify-center gap-3 text-[10px] text-white/30">
+        <span>USDY by Ondo Finance · on Mantle</span>
+        <span>·</span>
+        <a href="https://ondo.finance/usdy" target="_blank" rel="noreferrer" className="text-emerald-400/60 hover:text-emerald-400 transition-colors">About USDY</a>
+      </div>
+    </div>
+  );
+}
 
 /* ========== BRIDGE TAB ========== */
 function BridgeTab({ walletClient, onConnectWallet }: { walletClient: any; onConnectWallet?: () => void }) {

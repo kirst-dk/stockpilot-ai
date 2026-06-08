@@ -6,7 +6,7 @@ from typing import Optional
 
 from openai import AsyncOpenAI
 
-from ..strategies.base import PortfolioState, TradeRecommendation, Signal
+from strategies.base import PortfolioState, TradeRecommendation, Signal
 
 logger = logging.getLogger(__name__)
 

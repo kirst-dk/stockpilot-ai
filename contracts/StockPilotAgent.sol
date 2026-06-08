@@ -49,6 +49,16 @@ contract StockPilotAgent is Ownable {
         bool isActive;
     }
 
+    /// @notice A recorded AI Yield Optimizer decision: how capital is split between
+    /// USDY (tokenized US Treasuries) and xStocks (growth) at a point in time.
+    struct YieldDecision {
+        uint8   usdyPct;
+        uint8   stocksPct;
+        string  reason;
+        uint256 usdyYieldBps; // yield in basis points, e.g. 523 = 5.23%
+        uint256 timestamp;
+    }
+
     // --- State ---
 
     string public agentName;
@@ -75,6 +85,9 @@ contract StockPilotAgent is Ownable {
     uint256 public profitableTrades;
     uint256 public totalPnlUsd; // can be negative, stored as int via offset
 
+    // RWA / AI Yield Optimizer — history of USDY vs xStocks allocation decisions
+    YieldDecision[] public yieldDecisionHistory;
+
     // --- Events ---
 
     event AgentActionRecorded(
@@ -90,6 +103,12 @@ contract StockPilotAgent is Ownable {
     event FundsDeposited(address indexed token, uint256 amount);
     event FundsWithdrawn(address indexed token, uint256 amount);
     event PortfolioValueUpdated(uint256 totalValueUsd);
+    event YieldDecisionRecorded(
+        uint8   indexed usdyPct,
+        uint8   indexed stocksPct,
+        string  reason,
+        uint256 timestamp
+    );
 
     // --- Constructor ---
 
@@ -396,6 +415,52 @@ contract StockPilotAgent is Ownable {
             totalDeposited,
             totalWithdrawn
         );
+    }
+
+    // --- RWA / AI Yield Optimizer ---
+
+    /// @notice Record an AI yield-allocation decision (USDY vs xStocks) on-chain
+    /// @param usdyPct Percentage allocated to USDY (0-100)
+    /// @param stocksPct Percentage allocated to xStocks (0-100)
+    /// @param reason AI reasoning for the allocation
+    /// @param usdyYieldBps Current USDY yield in basis points (523 = 5.23%)
+    function recordYieldDecision(
+        uint8          usdyPct,
+        uint8          stocksPct,
+        string calldata reason,
+        uint256        usdyYieldBps
+    ) external onlyOwner {
+        require(usdyPct + stocksPct == 100, "Percentages must sum to 100");
+        yieldDecisionHistory.push(YieldDecision({
+            usdyPct:      usdyPct,
+            stocksPct:    stocksPct,
+            reason:       reason,
+            usdyYieldBps: usdyYieldBps,
+            timestamp:    block.timestamp
+        }));
+        emit YieldDecisionRecorded(usdyPct, stocksPct, reason, block.timestamp);
+    }
+
+    /// @notice Number of recorded yield decisions
+    function getYieldDecisionCount() external view returns (uint256) {
+        return yieldDecisionHistory.length;
+    }
+
+    /// @notice Get the most recent yield decision
+    function getLatestYieldDecision() external view returns (YieldDecision memory) {
+        require(yieldDecisionHistory.length > 0, "No decisions yet");
+        return yieldDecisionHistory[yieldDecisionHistory.length - 1];
+    }
+
+    /// @notice Get the most recent yield decisions, newest first (capped at `limit`)
+    function getRecentYieldDecisions(uint256 limit) external view returns (YieldDecision[] memory) {
+        uint256 total = yieldDecisionHistory.length;
+        uint256 count = limit < total ? limit : total;
+        YieldDecision[] memory result = new YieldDecision[](count);
+        for (uint256 i = 0; i < count; i++) {
+            result[i] = yieldDecisionHistory[total - 1 - i];
+        }
+        return result;
     }
 
     // --- Internal ---

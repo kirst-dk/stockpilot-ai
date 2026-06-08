@@ -4,11 +4,12 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ..xstocks_api.client import XStocksClient
-from ..strategies.base import BaseStrategy, PortfolioState, TradeRecommendation
-from ..strategies.balanced import BalancedStrategy
-from ..strategies.momentum import MomentumStrategy
-from ..strategies.value import ValueStrategy
+from xstocks_api.client import XStocksClient
+from strategies.base import BaseStrategy, PortfolioState, TradeRecommendation
+from strategies.balanced import BalancedStrategy
+from strategies.momentum import MomentumStrategy
+from strategies.value import ValueStrategy
+from strategies.rwa_balanced import rwa_balanced_strategy
 from .ai_engine import AIEngine
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,14 @@ AVAILABLE_STRATEGIES = {
     "balanced": BalancedStrategy,
     "momentum": MomentumStrategy,
     "value": ValueStrategy,
+}
+
+# Yield-optimizer strategies decide an asset-class split (USDY vs xStocks) and
+# return an allocation decision dict, rather than per-token TradeRecommendations.
+# They use a different interface than the rule-based BaseStrategy classes above,
+# so they are registered separately and run via run_yield_strategy().
+YIELD_STRATEGIES = {
+    "rwa_balanced": rwa_balanced_strategy,
 }
 
 # xStocks symbols available on Mantle
@@ -206,3 +215,33 @@ class PortfolioAgent:
             "action_count": len(self.state.action_history),
             "strategy": self.state.strategy_name,
         }
+
+    async def run_yield_strategy(
+        self,
+        name: str = "rwa_balanced",
+        symbols: Optional[list[str]] = None,
+        wallet_address: Optional[str] = None,
+    ) -> dict:
+        """Run a yield-optimizer strategy (e.g. RWA Balanced: USDY vs xStocks).
+
+        Returns the allocation decision dict from the strategy. The on-chain
+        recording of the decision (recordYieldDecision) is handled by the API
+        endpoint, which owns the signer/private key. The decision is appended to
+        the local action history for transparency.
+        """
+        fn = YIELD_STRATEGIES.get(name)
+        if fn is None:
+            return {"error": f"Unknown yield strategy: {name}. Available: {list(YIELD_STRATEGIES.keys())}"}
+
+        # Use the top symbols currently held, falling back to the default universe.
+        active = list(self.state.positions.keys())
+        symbols = symbols or (active if active else self.symbols)
+
+        decision = await fn(symbols=symbols, wallet_address=wallet_address)
+
+        self.state.action_history.append({
+            "action": "YIELD_DECISION",
+            "strategy": name,
+            **decision,
+        })
+        return decision
