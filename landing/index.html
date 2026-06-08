@@ -5,241 +5,280 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>StockPilot AI — AI-Powered Portfolio Manager on Mantle</title>
 <meta name="description" content="AI-powered autonomous portfolio manager for tokenized equities (xStocks) on Mantle Network. Bridge, build, analyze, and buy — all in one place.">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233b82f6'/%3E%3Cpath d='M6 22L11 13L16 17L21 9L26 15' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232be8a6'/%3E%3Cpath d='M6 22L11 13L16 17L21 9L26 15' stroke='%23051014' stroke-width='3' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://api.fontshare.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f%5B%5D=clash-display@500,600,700&f%5B%5D=satoshi@400,500,700,900&display=swap" rel="stylesheet">
 <style>
+:root{
+  --bg:#05070d; --bg2:#080c16; --panel:#0b1120;
+  --ink:#eaf0fa; --muted:#8a95ab; --faint:#5b6679;
+  --mint:#2be8a6; --mint-soft:rgba(43,232,166,.12); --mint-line:rgba(43,232,166,.28);
+  --blue:#4d8dff; --blue-soft:rgba(77,141,255,.12);
+  --line:rgba(255,255,255,.08); --line-2:rgba(255,255,255,.05);
+  --card:rgba(255,255,255,.025);
+  --display:'Clash Display','Satoshi',system-ui,sans-serif;
+  --body:'Satoshi','Inter',system-ui,sans-serif;
+  --radius:18px;
+}
 *{margin:0;padding:0;box-sizing:border-box}
 html{scroll-behavior:smooth}
-body{font-family:'Inter',system-ui,sans-serif;background:#030712;color:#e5e7eb;line-height:1.6;overflow-x:hidden}
+body{font-family:var(--body);background:var(--bg);color:var(--ink);line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+::-webkit-scrollbar{width:8px}
+::-webkit-scrollbar-track{background:var(--bg2)}
+::-webkit-scrollbar-thumb{background:#1c2434;border-radius:4px}
+::selection{background:rgba(43,232,166,.25)}
 
-/* Scrollbar */
-::-webkit-scrollbar{width:6px}
-::-webkit-scrollbar-track{background:#0a0f1a}
-::-webkit-scrollbar-thumb{background:#374151;border-radius:3px}
+/* Atmospheric background */
+.bg-fx{position:fixed;inset:0;z-index:-2;overflow:hidden;pointer-events:none}
+.bg-fx .mesh{position:absolute;border-radius:50%;filter:blur(80px);opacity:.5}
+.bg-fx .m1{top:-220px;left:50%;transform:translateX(-55%);width:760px;height:760px;background:radial-gradient(circle,rgba(43,232,166,.16),transparent 65%)}
+.bg-fx .m2{top:38%;right:-180px;width:560px;height:560px;background:radial-gradient(circle,rgba(77,141,255,.14),transparent 65%)}
+.bg-fx .m3{bottom:-200px;left:-160px;width:620px;height:620px;background:radial-gradient(circle,rgba(43,232,166,.08),transparent 65%)}
+.bg-grid{position:fixed;inset:0;z-index:-2;opacity:.025;background-image:linear-gradient(rgba(255,255,255,.6) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.6) 1px,transparent 1px);background-size:64px 64px;-webkit-mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 40%,transparent 100%);mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 40%,transparent 100%)}
+.bg-noise{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.035;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
 
 /* Navbar */
-nav{position:fixed;top:0;width:100%;z-index:100;backdrop-filter:blur(20px);background:rgba(3,7,18,.8);border-bottom:1px solid rgba(255,255,255,.05);padding:0 2rem}
+nav{position:fixed;top:0;width:100%;z-index:100;backdrop-filter:blur(20px);background:rgba(5,7,13,.65);border-bottom:1px solid var(--line-2);padding:0 28px;transition:background .3s}
 .nav-inner{max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;height:72px}
-.logo{display:flex;align-items:center;gap:10px;text-decoration:none}
-.logo-icon{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#6366f1);display:flex;align-items:center;justify-content:center;box-shadow:0 4px 15px rgba(59,130,246,.3)}
-.logo-text{font-size:18px;font-weight:800;color:white;letter-spacing:-.5px}
-.logo-badge{font-size:9px;font-weight:700;color:#818cf8;background:rgba(99,102,241,.15);padding:2px 8px;border-radius:12px;border:1px solid rgba(99,102,241,.25)}
-.nav-links{display:flex;align-items:center;gap:32px}
-.nav-links a{color:#9ca3af;text-decoration:none;font-size:14px;font-weight:500;transition:color .2s}
-.nav-links a:hover{color:white}
-.btn-launch{background:linear-gradient(135deg,#3b82f6,#6366f1);color:white;padding:10px 24px;border-radius:12px;font-weight:600;font-size:14px;text-decoration:none;transition:all .3s;box-shadow:0 4px 15px rgba(59,130,246,.3)}
-.btn-launch:hover{transform:translateY(-2px);box-shadow:0 8px 25px rgba(59,130,246,.4)}
+.logo{display:flex;align-items:center;gap:11px;text-decoration:none}
+.logo-icon{width:36px;height:36px;border-radius:11px;background:linear-gradient(135deg,var(--mint),#13b886);display:flex;align-items:center;justify-content:center;box-shadow:0 6px 20px rgba(43,232,166,.35)}
+.logo-text{font-family:var(--display);font-size:19px;font-weight:700;color:#fff;letter-spacing:-.3px}
+.logo-badge{font-size:9px;font-weight:700;color:var(--mint);background:var(--mint-soft);padding:3px 8px;border-radius:12px;border:1px solid var(--mint-line)}
+.nav-links{display:flex;align-items:center;gap:34px}
+.nav-links a{color:var(--muted);text-decoration:none;font-size:14px;font-weight:500;transition:color .2s}
+.nav-links a:hover{color:#fff}
+.btn-launch{background:linear-gradient(135deg,var(--mint),#16c08e);color:#04130d;padding:11px 22px;border-radius:12px;font-weight:700;font-size:14px;text-decoration:none;transition:all .25s;box-shadow:0 6px 20px rgba(43,232,166,.28)}
+.btn-launch:hover{transform:translateY(-2px);box-shadow:0 10px 30px rgba(43,232,166,.42)}
+@media(max-width:860px){.nav-links a:not(.btn-launch){display:none}}
 
 /* Hero */
-.hero{min-height:100vh;display:flex;align-items:center;justify-content:center;position:relative;padding:120px 2rem 80px;text-align:center}
-.hero-bg{position:absolute;inset:0;overflow:hidden}
-.hero-bg::before{content:'';position:absolute;top:-200px;left:50%;transform:translateX(-50%);width:800px;height:800px;background:radial-gradient(circle,rgba(99,102,241,.12),transparent 70%);border-radius:50%}
-.hero-bg::after{content:'';position:absolute;bottom:-100px;right:-100px;width:600px;height:600px;background:radial-gradient(circle,rgba(59,130,246,.08),transparent 70%);border-radius:50%}
-.hero-grid{position:absolute;inset:0;opacity:.03;background-image:linear-gradient(rgba(255,255,255,.1) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.1) 1px,transparent 1px);background-size:60px 60px}
-.hero-content{position:relative;z-index:1;max-width:800px}
-.hero-badge{display:inline-flex;align-items:center;gap:8px;padding:6px 16px;border-radius:24px;background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);font-size:13px;font-weight:600;color:#818cf8;margin-bottom:24px}
-.hero-badge .dot{width:6px;height:6px;border-radius:50%;background:#818cf8;animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-.hero h1{font-size:clamp(2.5rem,6vw,4.5rem);font-weight:900;letter-spacing:-2px;line-height:1.1;margin-bottom:20px}
-.hero h1 .gradient{background:linear-gradient(135deg,#60a5fa,#818cf8,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.hero p{font-size:clamp(1rem,2vw,1.25rem);color:#9ca3af;max-width:600px;margin:0 auto 40px;line-height:1.7}
-.hero-cta{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
-.btn-primary{background:linear-gradient(135deg,#3b82f6,#6366f1);color:white;padding:16px 40px;border-radius:14px;font-weight:700;font-size:16px;text-decoration:none;transition:all .3s;display:inline-flex;align-items:center;gap:8px;box-shadow:0 4px 20px rgba(59,130,246,.3)}
-.btn-primary:hover{transform:translateY(-3px);box-shadow:0 12px 35px rgba(59,130,246,.4)}
-.btn-secondary{background:rgba(255,255,255,.05);color:white;padding:16px 40px;border-radius:14px;font-weight:600;font-size:16px;text-decoration:none;transition:all .3s;border:1px solid rgba(255,255,255,.1)}
-.btn-secondary:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.2)}
-.hero-stats{display:flex;justify-content:center;gap:48px;margin-top:60px;flex-wrap:wrap}
-.stat{text-align:center}
-.stat-value{font-size:2rem;font-weight:800;background:linear-gradient(135deg,#60a5fa,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.stat-label{font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:1.5px;margin-top:4px;font-weight:600}
+.hero{position:relative;min-height:100vh;display:flex;align-items:center;justify-content:center;text-align:center;padding:128px 24px 72px;overflow:hidden}
+#hero3d{position:absolute;inset:0;z-index:0}
+#hero3d canvas{display:block;width:100%!important;height:100%!important}
+.hero-fallback{position:absolute;inset:0;z-index:0;display:none;align-items:center;justify-content:center}
+.hero-fallback .ring{width:min(60vw,420px);aspect-ratio:1;border-radius:50%;border:2px solid var(--mint-line);box-shadow:0 0 120px 20px rgba(43,232,166,.18),inset 0 0 80px rgba(43,232,166,.12)}
+.hero-content{position:relative;z-index:2;max-width:820px;pointer-events:none}
+.hero-content::before{content:'';position:absolute;inset:-12% -18%;z-index:-1;background:radial-gradient(ellipse 60% 58% at 50% 48%,rgba(5,7,13,.78),rgba(5,7,13,.5) 45%,transparent 72%);pointer-events:none}
+.hero-content a,.hero-content .hero-cta{pointer-events:auto}
+.hero-badge{display:inline-flex;align-items:center;gap:8px;padding:7px 16px;border-radius:24px;background:var(--mint-soft);border:1px solid var(--mint-line);font-size:13px;font-weight:600;color:var(--mint);margin-bottom:26px;backdrop-filter:blur(8px)}
+.hero-badge .dot{width:6px;height:6px;border-radius:50%;background:var(--mint);box-shadow:0 0 10px var(--mint);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.hero h1{font-family:var(--display);font-size:clamp(2.6rem,6.4vw,5rem);font-weight:600;letter-spacing:-1.5px;line-height:1.04;margin-bottom:22px;text-shadow:0 2px 40px rgba(5,7,13,.6)}
+.hero h1 .grad{background:linear-gradient(120deg,var(--mint),#7af0c6 40%,var(--blue));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.hero p{font-size:clamp(1rem,1.6vw,1.2rem);color:#aeb7c8;max-width:560px;margin:0 auto 36px;line-height:1.7;text-shadow:0 2px 24px rgba(5,7,13,.8)}
+.hero-cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+.btn-primary{background:linear-gradient(135deg,var(--mint),#16c08e);color:#04130d;padding:15px 34px;border-radius:14px;font-weight:700;font-size:16px;text-decoration:none;transition:all .25s;display:inline-flex;align-items:center;gap:9px;box-shadow:0 8px 28px rgba(43,232,166,.32)}
+.btn-primary:hover{transform:translateY(-3px);box-shadow:0 14px 40px rgba(43,232,166,.46)}
+.btn-secondary{background:rgba(255,255,255,.04);color:#fff;padding:15px 30px;border-radius:14px;font-weight:600;font-size:16px;text-decoration:none;transition:all .25s;border:1px solid var(--line);backdrop-filter:blur(8px)}
+.btn-secondary:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.22)}
+.hero-stats{display:flex;justify-content:center;gap:46px;margin-top:56px;flex-wrap:wrap}
+.stat-value{font-family:var(--display);font-size:2rem;font-weight:600;background:linear-gradient(135deg,var(--mint),#8af0cd);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.stat-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1.6px;margin-top:4px;font-weight:600}
+.scroll-hint{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);z-index:2;color:var(--muted);font-size:12px;letter-spacing:1.5px;display:flex;flex-direction:column;align-items:center;gap:8px}
+.scroll-hint .mouse{width:22px;height:34px;border:1.5px solid var(--line);border-radius:12px;position:relative}
+.scroll-hint .mouse::before{content:'';position:absolute;top:6px;left:50%;transform:translateX(-50%);width:3px;height:6px;border-radius:2px;background:var(--mint);animation:scrolly 1.8s infinite}
+@keyframes scrolly{0%{opacity:0;top:6px}40%{opacity:1}100%{opacity:0;top:16px}}
+
+/* Marquee (Block 2) */
+.marquee-section{padding:64px 0 84px;position:relative;border-top:1px solid var(--line-2);border-bottom:1px solid var(--line-2);background:linear-gradient(180deg,rgba(255,255,255,.012),transparent)}
+.marquee-head{text-align:center;max-width:760px;margin:0 auto 44px;padding:0 24px}
+.marquee-row{display:flex;gap:14px;width:max-content;will-change:transform}
+.marquee-track{overflow:hidden;-webkit-mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent);mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)}
+.marquee-track+.marquee-track{margin-top:14px}
+.row-a{animation:scrollL 60s linear infinite}
+.row-b{animation:scrollR 72s linear infinite}
+.marquee-track:hover .marquee-row{animation-play-state:paused}
+@keyframes scrollL{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@keyframes scrollR{from{transform:translateX(-50%)}to{transform:translateX(0)}}
+.token-chip{display:flex;align-items:center;gap:11px;padding:11px 18px 11px 11px;border-radius:14px;background:var(--card);border:1px solid var(--line);white-space:nowrap;transition:border-color .25s,background .25s,transform .25s}
+.token-chip:hover{border-color:var(--mint-line);background:rgba(43,232,166,.05);transform:translateY(-2px)}
+.token-chip img{width:38px;height:38px;border-radius:50%;background:#fff;object-fit:cover;flex-shrink:0}
+.token-chip .sym{font-family:var(--display);font-weight:600;font-size:15px;color:#fff;letter-spacing:-.2px}
+.token-chip .nm{font-size:11px;color:var(--muted);margin-top:1px}
 
 /* Sections */
-section{padding:100px 2rem}
+section{padding:104px 24px}
 .section-inner{max-width:1200px;margin:0 auto}
-.section-label{font-size:12px;font-weight:700;color:#818cf8;text-transform:uppercase;letter-spacing:2px;margin-bottom:12px}
-.section-title{font-size:clamp(2rem,4vw,3rem);font-weight:900;letter-spacing:-1px;margin-bottom:16px;color:white}
-.section-desc{font-size:16px;color:#6b7280;max-width:600px;line-height:1.7}
+.section-label{font-size:12px;font-weight:700;color:var(--mint);text-transform:uppercase;letter-spacing:2.4px;margin-bottom:14px}
+.section-title{font-family:var(--display);font-size:clamp(2rem,4vw,3.1rem);font-weight:600;letter-spacing:-1px;margin-bottom:16px;color:#fff;line-height:1.1}
+.section-desc{font-size:16px;color:var(--muted);max-width:600px;line-height:1.7}
 
 /* Features */
-.features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;margin-top:48px}
-.feature-card{padding:32px;border-radius:20px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);transition:all .3s;position:relative;overflow:hidden}
-.feature-card:hover{border-color:rgba(99,102,241,.2);background:rgba(255,255,255,.04);transform:translateY(-4px)}
-.feature-icon{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;margin-bottom:20px;font-size:22px}
-.fi-purple{background:rgba(168,85,247,.12)}
-.fi-blue{background:rgba(59,130,246,.12)}
-.fi-green{background:rgba(16,185,129,.12)}
-.fi-amber{background:rgba(245,158,11,.12)}
-.fi-pink{background:rgba(236,72,153,.12)}
-.fi-indigo{background:rgba(99,102,241,.12)}
-.feature-card h3{font-size:18px;font-weight:700;margin-bottom:8px;color:white}
-.feature-card p{font-size:14px;color:#6b7280;line-height:1.6}
-.feature-tag{display:inline-block;font-size:11px;font-weight:700;padding:4px 10px;border-radius:8px;margin-top:12px}
-.ft-purple{color:#c084fc;background:rgba(168,85,247,.1)}
-.ft-blue{color:#60a5fa;background:rgba(59,130,246,.1)}
-.ft-green{color:#34d399;background:rgba(16,185,129,.1)}
-.ft-amber{color:#fbbf24;background:rgba(245,158,11,.1)}
-.ft-pink{color:#f472b6;background:rgba(236,72,153,.1)}
-.ft-indigo{color:#818cf8;background:rgba(99,102,241,.1)}
+.features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:18px;margin-top:48px}
+.feature-card{padding:30px;border-radius:var(--radius);background:var(--card);border:1px solid var(--line);transition:all .3s;position:relative;overflow:hidden}
+.feature-card::after{content:'';position:absolute;inset:0;border-radius:var(--radius);background:radial-gradient(420px circle at var(--mx,50%) var(--my,0%),rgba(43,232,166,.10),transparent 45%);opacity:0;transition:opacity .3s;pointer-events:none}
+.feature-card:hover{border-color:var(--mint-line);transform:translateY(-4px)}
+.feature-card:hover::after{opacity:1}
+.feature-icon{width:50px;height:50px;border-radius:14px;display:flex;align-items:center;justify-content:center;margin-bottom:20px;background:var(--mint-soft);border:1px solid var(--mint-line);color:var(--mint)}
+.feature-icon.blue{background:var(--blue-soft);border-color:rgba(77,141,255,.28);color:var(--blue)}
+.feature-card h3{font-family:var(--display);font-size:18px;font-weight:600;margin-bottom:9px;color:#fff}
+.feature-card p{font-size:14px;color:var(--muted);line-height:1.65}
+.feature-tag{display:inline-block;font-size:11px;font-weight:700;padding:5px 11px;border-radius:8px;margin-top:14px;color:var(--mint);background:var(--mint-soft);border:1px solid var(--mint-line)}
 
 /* Flow */
-.flow-section{background:rgba(255,255,255,.01);border-top:1px solid rgba(255,255,255,.04);border-bottom:1px solid rgba(255,255,255,.04)}
+.flow-section{background:linear-gradient(180deg,rgba(255,255,255,.015),transparent);border-top:1px solid var(--line-2);border-bottom:1px solid var(--line-2)}
 .flow-steps{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:48px;flex-wrap:wrap}
-.flow-step{padding:14px 24px;border-radius:14px;font-size:14px;font-weight:700;white-space:nowrap}
-.flow-arrow{color:rgba(255,255,255,.15);font-size:18px}
-.fs-1{background:rgba(168,85,247,.1);color:#c084fc;border:1px solid rgba(168,85,247,.2)}
-.fs-2{background:rgba(59,130,246,.1);color:#60a5fa;border:1px solid rgba(59,130,246,.2)}
-.fs-3{background:rgba(16,185,129,.1);color:#34d399;border:1px solid rgba(16,185,129,.2)}
-.fs-4{background:rgba(245,158,11,.1);color:#fbbf24;border:1px solid rgba(245,158,11,.2)}
-.fs-5{background:rgba(255,255,255,.05);color:rgba(255,255,255,.6);border:1px solid rgba(255,255,255,.1)}
+.flow-step{padding:14px 22px;border-radius:13px;font-size:14px;font-weight:700;white-space:nowrap;background:var(--card);border:1px solid var(--line);color:#cdd5e3}
+.flow-step.accent{background:var(--mint-soft);border-color:var(--mint-line);color:var(--mint)}
+.flow-arrow{color:rgba(255,255,255,.2)}
+
+/* Assets strip */
+.assets-grid{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;max-width:920px;margin:48px auto 0}
+.asset-card{display:flex;align-items:center;gap:12px;padding:14px 20px;border-radius:14px;background:var(--card);border:1px solid var(--line);transition:all .25s}
+.asset-card:hover{border-color:var(--mint-line);transform:translateY(-3px)}
+.asset-card img{width:40px;height:40px;border-radius:50%;background:#fff}
+.asset-card .sym{font-family:var(--display);font-weight:600;font-size:16px;color:#fff}
+.asset-card .nm{font-size:11px;color:var(--muted)}
+.assets-more{text-align:center;margin-top:30px}
+.assets-more span{display:inline-flex;align-items:center;gap:8px;padding:9px 20px;border-radius:12px;background:var(--mint-soft);border:1px solid var(--mint-line);font-size:13px;color:var(--mint);font-weight:600}
 
 /* Partners */
-.partners-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:16px;margin-top:48px}
-.partner-card{padding:24px 16px;border-radius:16px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);text-align:center;transition:all .3s}
-.partner-card:hover{border-color:rgba(99,102,241,.2);background:rgba(255,255,255,.04)}
-.partner-card .name{font-size:14px;font-weight:700;color:white;margin-bottom:4px}
-.partner-card .role{font-size:11px;color:#6b7280}
+.partners-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-top:48px}
+.partner-card{padding:24px 16px;border-radius:15px;background:var(--card);border:1px solid var(--line);text-align:center;transition:all .25s}
+.partner-card:hover{border-color:var(--mint-line);transform:translateY(-3px)}
+.partner-card .name{font-family:var(--display);font-size:15px;font-weight:600;color:#fff;margin-bottom:4px}
+.partner-card .role{font-size:11px;color:var(--muted)}
 
 /* Contract */
-.contract-box{margin-top:48px;padding:32px;border-radius:20px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06)}
-.contract-box .label{font-size:12px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
-.contract-box .address{font-size:14px;font-family:'SF Mono','Fira Code',monospace;color:#60a5fa;word-break:break-all}
-.contract-box .network{font-size:13px;color:#9ca3af;margin-top:8px}
-.contract-box a{color:#818cf8;text-decoration:none;font-size:13px;font-weight:600}
+.contract-box{margin-top:44px;padding:30px;border-radius:var(--radius);background:var(--card);border:1px solid var(--line)}
+.contract-box .label{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
+.contract-box .address{font-size:14px;font-family:'Satoshi',monospace;color:var(--mint);word-break:break-all;font-weight:500}
+.contract-box .network{font-size:13px;color:var(--muted);margin-top:8px}
+.contract-box a{color:var(--blue);text-decoration:none;font-size:13px;font-weight:600}
 .contract-box a:hover{text-decoration:underline}
 
 /* CTA */
 .cta-section{text-align:center}
-.cta-box{max-width:700px;margin:0 auto;padding:64px 40px;border-radius:24px;background:linear-gradient(135deg,rgba(99,102,241,.08),rgba(59,130,246,.08));border:1px solid rgba(99,102,241,.15);position:relative;overflow:hidden}
-.cta-box::before{content:'';position:absolute;top:-100px;right:-100px;width:300px;height:300px;background:radial-gradient(circle,rgba(99,102,241,.1),transparent 70%);border-radius:50%}
-.cta-box h2{font-size:2.5rem;font-weight:900;letter-spacing:-1px;margin-bottom:16px;color:white;position:relative}
-.cta-box p{color:#9ca3af;margin-bottom:32px;font-size:16px;position:relative}
+.cta-box{max-width:720px;margin:0 auto;padding:60px 40px;border-radius:24px;background:linear-gradient(135deg,rgba(43,232,166,.08),rgba(77,141,255,.06));border:1px solid var(--mint-line);position:relative;overflow:hidden}
+.cta-box::before{content:'';position:absolute;top:-120px;left:50%;transform:translateX(-50%);width:360px;height:360px;background:radial-gradient(circle,rgba(43,232,166,.16),transparent 70%);border-radius:50%}
+.cta-box h2{position:relative;font-family:var(--display);font-size:clamp(1.8rem,3.4vw,2.6rem);font-weight:600;color:#fff;margin-bottom:14px;letter-spacing:-.5px}
+.cta-box p{position:relative;color:var(--muted);max-width:480px;margin:0 auto 30px}
 
 /* Footer */
-footer{border-top:1px solid rgba(255,255,255,.05);padding:40px 2rem}
-.footer-inner{max-width:1200px;margin:0 auto;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:20px}
-.footer-left{display:flex;align-items:center;gap:8px}
-.footer-links{display:flex;gap:24px}
-.footer-links a{color:#6b7280;text-decoration:none;font-size:13px;transition:color .2s}
-.footer-links a:hover{color:white}
-.footer-copy{color:#4b5563;font-size:12px}
+footer{border-top:1px solid var(--line-2);padding:40px 24px}
+.footer-inner{max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap}
+.footer-links{display:flex;gap:26px;flex-wrap:wrap}
+.footer-links a{color:var(--muted);text-decoration:none;font-size:14px;font-weight:500;transition:color .2s}
+.footer-links a:hover{color:var(--mint)}
+.footer-copy{font-size:13px;color:var(--faint)}
 
-/* Responsive */
-@media(max-width:768px){
-  .nav-links{display:none}
-  .hero h1{font-size:2.2rem}
-  .hero-stats{gap:24px}
-  .flow-steps{flex-direction:column}
-  .flow-arrow{transform:rotate(90deg)}
+/* Reveal */
+.reveal{opacity:0;transform:translateY(26px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1)}
+.reveal.in{opacity:1;transform:none}
+
+@media(prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+  .reveal{opacity:1;transform:none}
+}
+@media(max-width:640px){
+  section{padding:72px 20px}
+  .hero-stats{gap:30px;margin-top:42px}
   .footer-inner{flex-direction:column;text-align:center}
 }
 </style>
 </head>
 <body>
 
+<div class="bg-fx"><div class="mesh m1"></div><div class="mesh m2"></div><div class="mesh m3"></div></div>
+<div class="bg-grid"></div>
+<div class="bg-noise"></div>
+
 <!-- Navbar -->
 <nav>
   <div class="nav-inner">
     <a href="/" class="logo">
-      <div class="logo-icon">
-        <svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M2 12L5 7L8 9L11 4L14 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </div>
-      <span class="logo-text">STOCKPILOT</span>
+      <div class="logo-icon"><svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M2 12L5 7L8 9L11 4L14 8" stroke="#04130d" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <span class="logo-text">StockPilot</span>
       <span class="logo-badge">AI</span>
     </a>
     <div class="nav-links">
       <a href="#features">Features</a>
-      <a href="#how-it-works">How It Works</a>
-      <a href="#partners">Partners</a>
-      <a href="https://github.com/kirst-dk/stockpilot-ai" target="_blank">GitHub</a>
+      <a href="#how-it-works">How it works</a>
+      <a href="#assets">Assets</a>
+      <a href="https://github.com/kirst-dk/stockpilot-ai" target="_blank" rel="noopener">GitHub</a>
       <a href="https://app.stockpilotai.xyz" class="btn-launch">Launch App</a>
     </div>
   </div>
 </nav>
 
-<!-- Hero -->
+<!-- Hero (Block 1): 3D portal animation -->
 <section class="hero">
-  <div class="hero-bg">
-    <div class="hero-grid"></div>
-  </div>
+  <div id="hero3d"></div>
+  <div class="hero-fallback"><div class="ring"></div></div>
   <div class="hero-content">
-    <div class="hero-badge">
-      <span class="dot"></span>
-      Live on Mantle Network
-    </div>
-    <h1>AI-Powered Portfolio Manager for <span class="gradient">Tokenized Equities</span></h1>
-    <p>Bridge from any chain, build your xStocks portfolio, get AI analysis, and execute trades — all on Mantle Network with full on-chain transparency.</p>
+    <div class="hero-badge"><span class="dot"></span> Live on Mantle Network · 155+ xStocks</div>
+    <h1>Turn <span class="grad">USDC</span> into <span class="grad">Tokenized Stocks</span></h1>
+    <p>Bridge from any chain, build your xStocks portfolio, get AI analysis, and trade on-chain — autonomously, on Mantle.</p>
     <div class="hero-cta">
-      <a href="https://app.stockpilotai.xyz" class="btn-primary">
-        Launch App
+      <a href="https://app.stockpilotai.xyz" class="btn-primary">Launch App
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </a>
-      <a href="https://dorahacks.io/buidl/43884" target="_blank" class="btn-secondary">View on DoraHacks</a>
+      <a href="https://dorahacks.io/buidl/43884" target="_blank" rel="noopener" class="btn-secondary">View on DoraHacks</a>
     </div>
     <div class="hero-stats">
-      <div class="stat">
-        <div class="stat-value">100+</div>
-        <div class="stat-label">EVM Chains Supported</div>
-      </div>
-      <div class="stat">
-        <div class="stat-value">92+</div>
-        <div class="stat-label">xStocks Available</div>
-      </div>
-      <div class="stat">
-        <div class="stat-value">3</div>
-        <div class="stat-label">AI Engines</div>
-      </div>
-      <div class="stat">
-        <div class="stat-value">8</div>
-        <div class="stat-label">Partner Integrations</div>
-      </div>
+      <div class="stat"><div class="stat-value">100+</div><div class="stat-label">EVM Chains</div></div>
+      <div class="stat"><div class="stat-value">155+</div><div class="stat-label">xStocks Available</div></div>
+      <div class="stat"><div class="stat-value">3</div><div class="stat-label">AI Engines</div></div>
+      <div class="stat"><div class="stat-value">12</div><div class="stat-label">Live Pools</div></div>
     </div>
   </div>
+  <div class="scroll-hint"><div class="mouse"></div>SCROLL</div>
 </section>
+
+<!-- Block 2: infinite token marquee -->
+<div class="marquee-section">
+  <div class="marquee-head reveal">
+    <div class="section-label">Tokenized Equities</div>
+    <h2 class="section-title">155+ Stocks, Moving On-Chain 24/7</h2>
+    <p class="section-desc" style="margin:0 auto">Every major equity, ETF and crypto-treasury name — tokenized 1:1 and tradable around the clock on Mantle.</p>
+  </div>
+  <div class="marquee-track"><div class="marquee-row row-a" id="row-a"></div></div>
+  <div class="marquee-track"><div class="marquee-row row-b" id="row-b"></div></div>
+</div>
 
 <!-- Features -->
 <section id="features">
   <div class="section-inner">
-    <div class="section-label">Features</div>
-    <h2 class="section-title">Everything You Need to Invest in Tokenized Stocks</h2>
-    <p class="section-desc">From cross-chain bridging to AI-powered analysis — StockPilot AI handles the complexity so you can focus on building wealth.</p>
+    <div class="section-label reveal">Features</div>
+    <h2 class="section-title reveal">Everything You Need to Invest in Tokenized Stocks</h2>
+    <p class="section-desc reveal">From cross-chain bridging to AI-powered analysis — StockPilot AI handles the complexity so you can focus on building wealth.</p>
     <div class="features-grid">
-      <div class="feature-card">
-        <div class="feature-icon fi-purple">🌉</div>
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17V9a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3"/><path d="M4 17a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3"/><path d="M9 12h6"/></svg></div>
         <h3>Cross-Chain Bridge</h3>
         <p>Bridge assets from any EVM chain to Mantle in one click. Any token on any chain → USDC on Mantle, ready to invest.</p>
-        <span class="feature-tag ft-purple">Squid Router</span>
+        <span class="feature-tag">Relay · Squid Router</span>
       </div>
-      <div class="feature-card">
-        <div class="feature-icon fi-blue">📊</div>
+      <div class="feature-card reveal">
+        <div class="feature-icon blue"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg></div>
         <h3>Portfolio Builder</h3>
-        <p>Select from 92+ tokenized equities. Set custom allocations or let AI choose the optimal strategy for your risk profile.</p>
-        <span class="feature-tag ft-blue">xStocks + Fluxion</span>
+        <p>Select from 155+ tokenized equities. Set custom allocations or let AI choose the optimal strategy for your risk profile.</p>
+        <span class="feature-tag">xStocks + Fluxion</span>
       </div>
-      <div class="feature-card">
-        <div class="feature-icon fi-green">🤖</div>
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="7" width="16" height="13" rx="2"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/></svg></div>
         <h3>AI Portfolio Analysis</h3>
         <p>Get real-time risk scores, expected returns, and diversification ratings. AI evaluates your picks with on-chain data.</p>
-        <span class="feature-tag ft-green">ELFA + Nansen + AltLLM</span>
+        <span class="feature-tag">ELFA · Nansen · AltLLM</span>
       </div>
-      <div class="feature-card">
-        <div class="feature-icon fi-amber">💰</div>
+      <div class="feature-card reveal">
+        <div class="feature-icon blue"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.2A2.4 2.4 0 0 1 12 7.8c1.4 0 2.5.9 2.5 2M14.5 14.8A2.4 2.4 0 0 1 12 16.2c-1.4 0-2.5-.9-2.5-2"/></svg></div>
         <h3>One-Click Purchase</h3>
         <p>Buy your entire portfolio or individual xStocks with one click. Auto-swap any input token to USDC before purchase.</p>
-        <span class="feature-tag ft-amber">USDC · USDT · WETH · MNT</span>
+        <span class="feature-tag">USDC · USDT · WETH · MNT</span>
       </div>
-      <div class="feature-card">
-        <div class="feature-icon fi-pink">💬</div>
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z"/><path d="M8 10h8M8 13h5"/></svg></div>
         <h3>AI Chat Assistant</h3>
-        <p>Ask questions about strategies, risk analysis, or market conditions. Powered by ELFA AI + AltLLM with real market data.</p>
-        <span class="feature-tag ft-pink">ELFA AI + AltLLM</span>
+        <p>Ask Stocky about strategies, risk analysis, or market conditions. Powered by ELFA AI + AltLLM with real market data.</p>
+        <span class="feature-tag">Stocky Concierge</span>
       </div>
-      <div class="feature-card">
-        <div class="feature-icon fi-indigo">🔗</div>
+      <div class="feature-card reveal">
+        <div class="feature-icon blue"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12a3 3 0 0 0 3 3l3-3a3 3 0 0 0-3-3"/><path d="M14 8.5 16.5 6a3.5 3.5 0 0 1 5 5L19 13.5"/><path d="M10 15.5 7.5 18a3.5 3.5 0 0 1-5-5L5 10.5"/></svg></div>
         <h3>On-Chain Transparency</h3>
         <p>Every trade is recorded on Mantle. Smart contract verified on Mantlescan. Full auditability and trustless execution.</p>
-        <span class="feature-tag ft-indigo">Mantle Network</span>
+        <span class="feature-tag">Mantle Network</span>
       </div>
     </div>
   </div>
@@ -248,150 +287,57 @@ footer{border-top:1px solid rgba(255,255,255,.05);padding:40px 2rem}
 <!-- How It Works -->
 <section id="how-it-works" class="flow-section">
   <div class="section-inner" style="text-align:center">
-    <div class="section-label">How It Works</div>
-    <h2 class="section-title">Bridge → Build → Analyze → Buy</h2>
-    <p class="section-desc" style="margin:0 auto">From any EVM chain to a diversified xStocks portfolio in minutes.</p>
-    <div class="flow-steps">
-      <div class="flow-step fs-5">Any EVM Wallet</div>
+    <div class="section-label reveal">How It Works</div>
+    <h2 class="section-title reveal">Bridge → Build → Analyze → Buy</h2>
+    <p class="section-desc reveal" style="margin:0 auto">From any EVM chain to a diversified xStocks portfolio in minutes.</p>
+    <div class="flow-steps reveal">
+      <div class="flow-step">Any EVM Wallet</div>
       <span class="flow-arrow">→</span>
-      <div class="flow-step fs-1">Squid Bridge</div>
+      <div class="flow-step accent">Bridge</div>
       <span class="flow-arrow">→</span>
-      <div class="flow-step fs-2">Portfolio Builder</div>
+      <div class="flow-step accent">Portfolio Builder</div>
       <span class="flow-arrow">→</span>
-      <div class="flow-step fs-3">AI Analysis</div>
+      <div class="flow-step accent">AI Analysis</div>
       <span class="flow-arrow">→</span>
-      <div class="flow-step fs-4">Buy xStocks</div>
+      <div class="flow-step accent">Buy xStocks</div>
       <span class="flow-arrow">→</span>
-      <div class="flow-step fs-5">Tokens in Wallet</div>
+      <div class="flow-step">Tokens in Wallet</div>
     </div>
   </div>
 </section>
 
 <!-- Supported Assets -->
-<section>
+<section id="assets">
   <div class="section-inner" style="text-align:center">
-    <div class="section-label">Tokenized Equities</div>
-    <h2 class="section-title">Trade World-Class Stocks On-Chain</h2>
-    <p class="section-desc" style="margin:0 auto 48px">Access 92+ tokenized equities on Mantle — trade 24/7, fractional amounts, bridge to 5 networks via Chainlink CCIP.</p>
-    <div style="display:flex;justify-content:center;gap:12px;flex-wrap:wrap;max-width:900px;margin:0 auto 32px">
-      <div style="padding:16px 24px;border-radius:14px;background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.15);text-align:center">
-        <div style="font-size:18px;font-weight:800;color:white">SPYx</div>
-        <div style="font-size:11px;color:#6b7280;margin-top:3px">S&P 500 ETF</div>
-      </div>
-      <div style="padding:16px 24px;border-radius:14px;background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.15);text-align:center">
-        <div style="font-size:18px;font-weight:800;color:white">NVDAx</div>
-        <div style="font-size:11px;color:#6b7280;margin-top:3px">NVIDIA</div>
-      </div>
-      <div style="padding:16px 24px;border-radius:14px;background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.15);text-align:center">
-        <div style="font-size:18px;font-weight:800;color:white">AAPLx</div>
-        <div style="font-size:11px;color:#6b7280;margin-top:3px">Apple</div>
-      </div>
-      <div style="padding:16px 24px;border-radius:14px;background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.15);text-align:center">
-        <div style="font-size:18px;font-weight:800;color:white">TSLAx</div>
-        <div style="font-size:11px;color:#6b7280;margin-top:3px">Tesla</div>
-      </div>
-      <div style="padding:16px 24px;border-radius:14px;background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.15);text-align:center">
-        <div style="font-size:18px;font-weight:800;color:white">MSFTx</div>
-        <div style="font-size:11px;color:#6b7280;margin-top:3px">Microsoft</div>
-      </div>
-      <div style="padding:16px 24px;border-radius:14px;background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.15);text-align:center">
-        <div style="font-size:18px;font-weight:800;color:white">AMZNx</div>
-        <div style="font-size:11px;color:#6b7280;margin-top:3px">Amazon</div>
-      </div>
-      <div style="padding:16px 24px;border-radius:14px;background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.15);text-align:center">
-        <div style="font-size:18px;font-weight:800;color:white">GOOGLx</div>
-        <div style="font-size:11px;color:#6b7280;margin-top:3px">Google</div>
-      </div>
-      <div style="padding:16px 24px;border-radius:14px;background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.15);text-align:center">
-        <div style="font-size:18px;font-weight:800;color:white">METAx</div>
-        <div style="font-size:11px;color:#6b7280;margin-top:3px">Meta</div>
-      </div>
-      <div style="padding:16px 24px;border-radius:14px;background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.15);text-align:center">
-        <div style="font-size:18px;font-weight:800;color:white">QQQx</div>
-        <div style="font-size:11px;color:#6b7280;margin-top:3px">Nasdaq 100 ETF</div>
-      </div>
-      <div style="padding:16px 24px;border-radius:14px;background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.15);text-align:center">
-        <div style="font-size:18px;font-weight:800;color:white">COINx</div>
-        <div style="font-size:11px;color:#6b7280;margin-top:3px">Coinbase</div>
-      </div>
-      <div style="padding:16px 24px;border-radius:14px;background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.15);text-align:center">
-        <div style="font-size:18px;font-weight:800;color:white">MSTRx</div>
-        <div style="font-size:11px;color:#6b7280;margin-top:3px">MicroStrategy</div>
-      </div>
-      <div style="padding:16px 24px;border-radius:14px;background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.15);text-align:center">
-        <div style="font-size:18px;font-weight:800;color:white">TSMx</div>
-        <div style="font-size:11px;color:#6b7280;margin-top:3px">TSMC</div>
-      </div>
-    </div>
-    <div style="text-align:center;margin-top:16px">
-      <span style="display:inline-flex;align-items:center;gap:8px;padding:8px 20px;border-radius:12px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);font-size:13px;color:#34d399;font-weight:600">+ 80 more stocks &middot; ETFs, energy, mining, biotech, fintech</span>
-    </div>
-    <div style="display:flex;justify-content:center;gap:12px;flex-wrap:wrap;margin-top:32px">
-      <div style="padding:10px 20px;border-radius:10px;background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.15);text-align:center">
-        <div style="font-size:11px;font-weight:700;color:#34d399;letter-spacing:1px">BRIDGE</div>
-        <div style="font-size:10px;color:#6b7280;margin-top:3px">12 assets via Chainlink CCIP</div>
-      </div>
-      <div style="padding:10px 20px;border-radius:10px;background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.15);text-align:center">
-        <div style="font-size:11px;font-weight:700;color:#818cf8;letter-spacing:1px">NETWORKS</div>
-        <div style="font-size:10px;color:#6b7280;margin-top:3px">ETH &middot; BSC &middot; ARB &middot; INK &middot; MNT</div>
-      </div>
-      <div style="padding:10px 20px;border-radius:10px;background:rgba(168,85,247,.06);border:1px solid rgba(168,85,247,.15);text-align:center">
-        <div style="font-size:11px;font-weight:700;color:#a855f7;letter-spacing:1px">BUY ON DEX</div>
-        <div style="font-size:10px;color:#6b7280;margin-top:3px">Fluxion Network (Mantle)</div>
-      </div>
-    </div>
+    <div class="section-label reveal">Top Holdings</div>
+    <h2 class="section-title reveal">Trade World-Class Stocks On-Chain</h2>
+    <p class="section-desc reveal" style="margin:0 auto">Access 155+ tokenized equities on Mantle — trade 24/7, fractional amounts, with deep DEX liquidity on Fluxion.</p>
+    <div class="assets-grid" id="assets-grid"></div>
+    <div class="assets-more reveal"><span>+ 140 more · ETFs, energy, mining, biotech, fintech & crypto treasuries</span></div>
   </div>
 </section>
 
 <!-- Partners -->
-<section id="partners" style="background:rgba(255,255,255,.01);border-top:1px solid rgba(255,255,255,.04)">
+<section id="partners" style="background:linear-gradient(180deg,rgba(255,255,255,.012),transparent);border-top:1px solid var(--line-2)">
   <div class="section-inner" style="text-align:center">
-    <div class="section-label">Ecosystem Partners</div>
-    <h2 class="section-title">Powered by the Best in Web3</h2>
-    <p class="section-desc" style="margin:0 auto">Built with leading protocols and AI platforms in the Mantle ecosystem.</p>
+    <div class="section-label reveal">Ecosystem Partners</div>
+    <h2 class="section-title reveal">Powered by the Best in Web3</h2>
+    <p class="section-desc reveal" style="margin:0 auto">Built with leading protocols and AI platforms in the Mantle ecosystem.</p>
     <div class="partners-grid">
-      <div class="partner-card">
-        <div class="name">Mantle Network</div>
-        <div class="role">L2 Blockchain</div>
-      </div>
-      <div class="partner-card">
-        <div class="name">Squid Router</div>
-        <div class="role">Cross-Chain Bridge</div>
-      </div>
-      <div class="partner-card">
-        <div class="name">Nansen</div>
-        <div class="role">On-Chain Analytics</div>
-      </div>
-      <div class="partner-card">
-        <div class="name">ELFA AI</div>
-        <div class="role">Market Intelligence</div>
-      </div>
-      <div class="partner-card">
-        <div class="name">AltLLM</div>
-        <div class="role">AI Inference</div>
-      </div>
-      <div class="partner-card">
-        <div class="name">xStocks</div>
-        <div class="role">Tokenized Equities</div>
-      </div>
-      <div class="partner-card">
-        <div class="name">Fluxion Network</div>
-        <div class="role">DEX on Mantle</div>
-      </div>
-      <div class="partner-card">
-        <div class="name">RainbowKit</div>
-        <div class="role">Wallet Connection</div>
-      </div>
+      <div class="partner-card reveal"><div class="name">Mantle Network</div><div class="role">L2 Blockchain</div></div>
+      <div class="partner-card reveal"><div class="name">Relay · Squid</div><div class="role">Cross-Chain Bridge</div></div>
+      <div class="partner-card reveal"><div class="name">Nansen</div><div class="role">On-Chain Analytics</div></div>
+      <div class="partner-card reveal"><div class="name">ELFA AI</div><div class="role">Market Intelligence</div></div>
+      <div class="partner-card reveal"><div class="name">AltLLM</div><div class="role">AI Inference</div></div>
+      <div class="partner-card reveal"><div class="name">xStocks</div><div class="role">Tokenized Equities</div></div>
+      <div class="partner-card reveal"><div class="name">Fluxion Network</div><div class="role">DEX on Mantle</div></div>
+      <div class="partner-card reveal"><div class="name">RainbowKit</div><div class="role">Wallet Connection</div></div>
     </div>
-
-    <!-- Contract -->
-    <div class="contract-box">
+    <div class="contract-box reveal">
       <div class="label">Verified Smart Contract</div>
       <div class="address">0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9</div>
       <div class="network">Mantle Mainnet · ChainID 5000</div>
-      <div style="margin-top:12px">
-        <a href="https://mantlescan.xyz/address/0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9#code" target="_blank">View on Mantlescan →</a>
-      </div>
+      <div style="margin-top:12px"><a href="https://mantlescan.xyz/address/0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9#code" target="_blank" rel="noopener">View on Mantlescan →</a></div>
     </div>
   </div>
 </section>
@@ -399,11 +345,10 @@ footer{border-top:1px solid rgba(255,255,255,.05);padding:40px 2rem}
 <!-- CTA -->
 <section class="cta-section">
   <div class="section-inner">
-    <div class="cta-box">
+    <div class="cta-box reveal">
       <h2>Ready to Invest?</h2>
       <p>Connect your wallet, bridge assets to Mantle, and start building your AI-powered xStocks portfolio.</p>
-      <a href="https://app.stockpilotai.xyz" class="btn-primary">
-        Launch App
+      <a href="https://app.stockpilotai.xyz" class="btn-primary">Launch App
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </a>
     </div>
@@ -413,25 +358,334 @@ footer{border-top:1px solid rgba(255,255,255,.05);padding:40px 2rem}
 <!-- Footer -->
 <footer>
   <div class="footer-inner">
-    <div class="footer-left">
-      <a href="/" class="logo" style="text-decoration:none">
-        <div class="logo-icon" style="width:28px;height:28px">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 12L5 7L8 9L11 4L14 8" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </div>
-        <span class="logo-text" style="font-size:15px">STOCKPILOT</span>
-        <span class="logo-badge">AI</span>
-      </a>
-    </div>
+    <a href="/" class="logo">
+      <div class="logo-icon" style="width:30px;height:30px"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M2 12L5 7L8 9L11 4L14 8" stroke="#04130d" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <span class="logo-text" style="font-size:16px">StockPilot</span>
+      <span class="logo-badge">AI</span>
+    </a>
     <div class="footer-links">
       <a href="https://app.stockpilotai.xyz">App</a>
-      <a href="https://github.com/kirst-dk/stockpilot-ai" target="_blank">GitHub</a>
-      <a href="https://dorahacks.io/buidl/43884" target="_blank">DoraHacks</a>
-      <a href="https://x.com/stepanchenko221" target="_blank">Twitter</a>
-      <a href="https://mantlescan.xyz/address/0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9" target="_blank">Contract</a>
+      <a href="https://github.com/kirst-dk/stockpilot-ai" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://dorahacks.io/buidl/43884" target="_blank" rel="noopener">DoraHacks</a>
+      <a href="https://x.com/stepanchenko221" target="_blank" rel="noopener">Twitter</a>
+      <a href="https://mantlescan.xyz/address/0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9" target="_blank" rel="noopener">Contract</a>
     </div>
-    <div class="footer-copy">© 2026 StockPilot AI. Built on Mantle Network.</div>
+    <div class="footer-copy">© 2026 StockPilot AI · Built on Mantle Network</div>
   </div>
 </footer>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script>
+/* ---------- Data load + marquee + assets + reveal (no-module, always runs) ---------- */
+const FEATURED = ["AAPLx","NVDAx","TSLAx","SPYx","MSFTx","AMZNx","GOOGLx","METAx","COINx","MSTRx","QQQx","AMDx","NFLXx","AVGOx","CRMx","HOODx","PLTRx","CRCLx"];
+let XSTOCKS = [];
+async function loadData(){
+  try{
+    const r = await fetch('xstocks-data.json'); XSTOCKS = await r.json();
+  }catch(e){ XSTOCKS = []; }
+  buildMarquee(); buildAssets();
+  window.__xstocksReady && window.__xstocksReady();
+}
+function chip(x){
+  const nm = x.name.replace(/ xStock$/,'');
+  return `<a class="token-chip" href="https://app.stockpilotai.xyz" target="_blank" rel="noopener">
+    <img loading="lazy" src="logos/${x.symbol}.png" alt="${x.symbol}" onerror="this.style.visibility='hidden'">
+    <span><span class="sym">${x.symbol}</span><span class="nm" style="display:block">${nm}</span></span></a>`;
+}
+function buildMarquee(){
+  if(!XSTOCKS.length) return;
+  const half = Math.ceil(XSTOCKS.length/2);
+  const a = XSTOCKS.slice(0,half), b = XSTOCKS.slice(half);
+  document.getElementById('row-a').innerHTML = (a.map(chip).join('')).repeat(2);
+  document.getElementById('row-b').innerHTML = (b.map(chip).join('')).repeat(2);
+}
+function buildAssets(){
+  const pick = FEATURED.map(s=>XSTOCKS.find(x=>x.symbol===s)).filter(Boolean).slice(0,12);
+  const host = document.getElementById('assets-grid');
+  if(host) host.innerHTML = pick.map(x=>`<div class="asset-card">
+    <img loading="lazy" src="logos/${x.symbol}.png" alt="${x.symbol}" onerror="this.style.visibility='hidden'">
+    <span style="text-align:left"><span class="sym" style="display:block">${x.symbol}</span><span class="nm">${x.name.replace(/ xStock$/,'')}</span></span></div>`).join('');
+}
+/* Scroll reveal */
+const io = new IntersectionObserver((entries)=>{
+  entries.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target);} });
+},{threshold:.12});
+document.querySelectorAll('.reveal').forEach((el,i)=>{ el.style.transitionDelay=(i%6*60)+'ms'; io.observe(el); });
+/* Feature card glow follow */
+document.querySelectorAll('.feature-card').forEach(c=>{
+  c.addEventListener('pointermove',e=>{const r=c.getBoundingClientRect();c.style.setProperty('--mx',(e.clientX-r.left)+'px');c.style.setProperty('--my',(e.clientY-r.top)+'px');});
+});
+loadData();
+</script>
+
+<script type="module">
+/* ---------- Premium Three.js 3D hero: portal · glass/metal · HDRI · bloom · DoF · scroll+cursor ---------- */
+const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const wrap = document.getElementById('hero3d');
+const heroEl = document.querySelector('.hero');
+const fallback = document.querySelector('.hero-fallback');
+function showFallback(){ if(fallback) fallback.style.display='flex'; }
+
+/* Smooth scroll (Lenis) — drives the scroll-scrubbed hero. Skipped under reduced-motion. */
+let scrollY = window.scrollY || 0;
+if(!reduce){
+  (async()=>{
+    try{
+      const Lenis = (await import('https://cdn.jsdelivr.net/npm/lenis@1.1.14/+esm')).default;
+      const lenis = new Lenis({ lerp:0.09, wheelMultiplier:1, smoothWheel:true });
+      lenis.on('scroll', e=>{ scrollY = e.scroll; });
+      const raf = t=>{ lenis.raf(t); requestAnimationFrame(raf); };
+      requestAnimationFrame(raf);
+      document.querySelectorAll('a[href^="#"]').forEach(a=>{
+        a.addEventListener('click', ev=>{
+          const id = a.getAttribute('href');
+          if(id && id.length>1){ const el=document.querySelector(id); if(el){ ev.preventDefault(); lenis.scrollTo(el,{offset:-72}); } }
+        });
+      });
+    }catch(e){ console.warn('Lenis unavailable, native scroll:', e); }
+  })();
+}
+
+if(reduce){ showFallback(); }
+else{
+  try{
+    const THREE = await import('three');
+    const { EffectComposer } = await import('three/addons/postprocessing/EffectComposer.js');
+    const { RenderPass } = await import('three/addons/postprocessing/RenderPass.js');
+    const { UnrealBloomPass } = await import('three/addons/postprocessing/UnrealBloomPass.js');
+    const { OutputPass } = await import('three/addons/postprocessing/OutputPass.js');
+    const { RoomEnvironment } = await import('three/addons/environments/RoomEnvironment.js');
+    const { RoundedBoxGeometry } = await import('three/addons/geometries/RoundedBoxGeometry.js');
+
+    const lerp = (a,b,t)=>a+(b-a)*t;
+    let W = wrap.clientWidth, H = wrap.clientHeight;
+    const mobile = W < 760;
+    let BokehPass = null;
+    if(!mobile){ try{ BokehPass = (await import('three/addons/postprocessing/BokehPass.js')).BokehPass; }catch(e){} }
+
+    const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true, powerPreference:'high-performance' });
+    let dpr = Math.min(devicePixelRatio||1, mobile?1.5:2);
+    renderer.setPixelRatio(dpr);
+    renderer.setSize(W, H);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+    wrap.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(48, W/H, 0.1, 100);
+    camera.position.set(0, 0.4, 15);
+    camera.lookAt(0,0,0);
+
+    // HDRI-style reflections from a procedural studio room (no external asset, instant + offline)
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    pmrem.compileEquirectangularShader();
+    const envMap = pmrem.fromScene(new RoomEnvironment(), 0.035).texture;
+    scene.environment = envMap;
+
+    // Studio lighting: key / fill / rim + portal core light
+    scene.add(new THREE.AmbientLight(0x223044, 0.55));
+    const key = new THREE.DirectionalLight(0xffffff, 2.0); key.position.set(5,8,8); scene.add(key);
+    const fill = new THREE.DirectionalLight(0x4d8dff, 0.8); fill.position.set(-8,-1,6); scene.add(fill);
+    const rim = new THREE.DirectionalLight(0x2be8a6, 1.4); rim.position.set(0,-5,-9); scene.add(rim);
+    const portalLight = new THREE.PointLight(0x2be8a6, 6, 22, 2); portalLight.position.set(0,0,0.6); scene.add(portalLight);
+
+    function radialTex(c0,c1){
+      const cv=document.createElement('canvas'); cv.width=cv.height=256; const ctx=cv.getContext('2d');
+      const g=ctx.createRadialGradient(128,128,0,128,128,128);
+      g.addColorStop(0,c0); g.addColorStop(0.55,c1); g.addColorStop(1,'rgba(43,232,166,0)');
+      ctx.fillStyle=g; ctx.fillRect(0,0,256,256);
+      const t=new THREE.CanvasTexture(cv); t.colorSpace=THREE.SRGBColorSpace; return t;
+    }
+
+    // ---- Portal (polished metal ring + emissive halo + glowing core + dark well) ----
+    const portal = new THREE.Group(); scene.add(portal);
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(3, 0.17, 40, 220),
+      new THREE.MeshPhysicalMaterial({ color:0x0c2c24, metalness:1.0, roughness:0.12, emissive:0x2be8a6, emissiveIntensity:1.6, envMapIntensity:1.4, clearcoat:1, clearcoatRoughness:0.1 })
+    );
+    portal.add(ring);
+    const ring2 = new THREE.Mesh(
+      new THREE.TorusGeometry(3.32, 0.05, 24, 220),
+      new THREE.MeshBasicMaterial({ color:0x6effc9, transparent:true, opacity:0.5, blending:THREE.AdditiveBlending })
+    );
+    portal.add(ring2);
+    const core = new THREE.Mesh(
+      new THREE.PlaneGeometry(8,8),
+      new THREE.MeshBasicMaterial({ map:radialTex('rgba(120,255,210,0.9)','rgba(43,232,166,0.35)'), transparent:true, opacity:0.5, blending:THREE.AdditiveBlending, depthWrite:false })
+    );
+    core.position.z=-0.2; portal.add(core);
+    const well = new THREE.Mesh(
+      new THREE.CircleGeometry(2.84, 96),
+      new THREE.MeshBasicMaterial({ color:0x03100c, transparent:true, opacity:0.55 })
+    );
+    well.position.z=-0.08; portal.add(well);
+
+    // ---- Background "liquid" glass blobs (transmission) for depth/atmosphere ----
+    const blobs=[];
+    if(!mobile){
+      const blobMat = new THREE.MeshPhysicalMaterial({ color:0x2be8a6, metalness:0, roughness:0.06, transmission:0.95, thickness:2.2, ior:1.35, iridescence:1, iridescenceIOR:1.3, envMapIntensity:1.2, transparent:true });
+      const blobMat2 = blobMat.clone(); blobMat2.color=new THREE.Color(0x4d8dff);
+      const b1 = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4, 6), blobMat); b1.position.set(-7.5,3,-9); scene.add(b1); blobs.push(b1);
+      const b2 = new THREE.Mesh(new THREE.IcosahedronGeometry(1.9, 6), blobMat2); b2.position.set(8,-3.5,-11); scene.add(b2); blobs.push(b2);
+    }
+
+    // ---- Particle dust for depth ----
+    const dustGeo = new THREE.BufferGeometry();
+    const N = mobile?160:380; const dpos=new Float32Array(N*3);
+    for(let i=0;i<N;i++){ dpos[i*3]=(Math.random()-0.5)*30; dpos[i*3+1]=(Math.random()-0.5)*18; dpos[i*3+2]=(Math.random()-0.5)*16-3; }
+    dustGeo.setAttribute('position', new THREE.BufferAttribute(dpos,3));
+    const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color:0x8fe6c8, size:0.03, transparent:true, opacity:0.5, depthWrite:false }));
+    scene.add(dust);
+
+    // ---- Textures ----
+    const texLoader = new THREE.TextureLoader();
+    const usdcTex = texLoader.load('usdc.png'); usdcTex.colorSpace = THREE.SRGBColorSpace; usdcTex.anisotropy = 4;
+    const featured = ["AAPLx","NVDAx","TSLAx","SPYx","MSFTx","AMZNx","GOOGLx","METAx","COINx","MSTRx","QQQx","AMDx","NFLXx","AVGOx","CRMx","HOODx"];
+    const tokenTex = featured.map(s=>{ const t = texLoader.load('logos/'+s+'.png'); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy=4; return t; });
+
+    // ---- USDC coin: polished-metal rim + textured faces ----
+    const coinGeo = new THREE.CylinderGeometry(0.62, 0.62, 0.13, 56);
+    const edgeMat = new THREE.MeshPhysicalMaterial({ color:0x2775ca, metalness:1.0, roughness:0.18, envMapIntensity:1.6, clearcoat:1, clearcoatRoughness:0.12 });
+    const faceMat = new THREE.MeshPhysicalMaterial({ map:usdcTex, metalness:0.35, roughness:0.32, envMapIntensity:1.2, clearcoat:0.8, clearcoatRoughness:0.2 });
+
+    // ---- Token card: glass-ish rounded frame + emissive logo (billboarded) ----
+    const frameGeo = new RoundedBoxGeometry(1.34, 1.34, 0.12, 4, 0.18);
+    const logoGeo = new THREE.PlaneGeometry(0.96, 0.96);
+    function makeCard(tex){
+      const g = new THREE.Group();
+      const frame = new THREE.Mesh(frameGeo, new THREE.MeshPhysicalMaterial({ color:0x0a1422, metalness:0.2, roughness:0.18, envMapIntensity:1.3, clearcoat:1, clearcoatRoughness:0.12, emissive:0x0c3a2b, emissiveIntensity:0.5, transparent:true }));
+      const logo = new THREE.Mesh(logoGeo, new THREE.MeshStandardMaterial({ map:tex, emissiveMap:tex, emissive:0xffffff, emissiveIntensity:0.4, roughness:0.45, metalness:0.0, transparent:true, envMapIntensity:0.8 }));
+      logo.position.z=0.075; g.add(frame); g.add(logo);
+      g.userData.fade = o=>{ frame.material.opacity=o; logo.material.opacity=o; };
+      return g;
+    }
+
+    const coins=[], tokens=[];
+    const MAX_COINS = mobile?7:13, MAX_TOKENS = mobile?16:30;
+    function spawnCoin(){
+      if(coins.length>=MAX_COINS) return;
+      const m = new THREE.Mesh(coinGeo, [edgeMat, faceMat, faceMat]);
+      m.position.set((Math.random()-0.5)*5.5, 8.5+Math.random()*4, (Math.random()-0.5)*2.4);
+      m.rotation.set(Math.random()*6.28, Math.random()*6.28, Math.random()*6.28);
+      m.userData={ vy:-(2.5+Math.random()*1.4), rx:(Math.random()-0.5)*3.4, rz:(Math.random()-0.5)*3.4 };
+      scene.add(m); coins.push(m);
+    }
+    function spawnToken(){
+      if(tokens.length>=MAX_TOKENS) return;
+      const tex = tokenTex[(Math.random()*tokenTex.length)|0];
+      const c = makeCard(tex);
+      c.position.set(0,0,0.3);
+      const ang=Math.random()*Math.PI*2, sp=2.6+Math.random()*2.2;
+      c.userData = Object.assign(c.userData, { vx:Math.cos(ang)*sp*0.8, vy:Math.sin(ang)*sp*0.62+0.4, vz:1.4+Math.random()*1.9, life:0, ttl:2.6+Math.random()*1.3 });
+      c.scale.setScalar(0.01); scene.add(c); tokens.push(c);
+    }
+
+    // ---- Postprocessing: Render → DoF(Bokeh) → Bloom → Output(ACES) ----
+    const composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    let bokeh=null;
+    if(BokehPass){ bokeh = new BokehPass(scene, camera, { focus:15.0, aperture:0.0006, maxblur:0.004 }); composer.addPass(bokeh); }
+    const bloom = new UnrealBloomPass(new THREE.Vector2(W,H), mobile?0.6:0.9, 0.6, 0.78);
+    composer.addPass(bloom);
+    composer.addPass(new OutputPass());
+
+    const clock = new THREE.Clock();
+    let coinTimer=0;
+    const mouse={x:0,y:0};
+    window.addEventListener('pointermove', e=>{ mouse.x=(e.clientX/innerWidth)*2-1; mouse.y=-((e.clientY/innerHeight)*2-1); }, {passive:true});
+
+    function onResize(){
+      W=wrap.clientWidth; H=wrap.clientHeight;
+      camera.aspect=W/H; camera.updateProjectionMatrix();
+      renderer.setSize(W,H); composer.setSize(W,H);
+    }
+    window.addEventListener('resize', onResize);
+
+    let running=true;
+    document.addEventListener('visibilitychange', ()=>{ running=!document.hidden; if(running){ clock.getDelta(); animate(); } });
+
+    let acc=0, frames=0, adapted=false;
+
+    function animate(){
+      if(!running) return;
+      requestAnimationFrame(animate);
+      const dt = Math.min(clock.getDelta(), 0.05);
+      const t = clock.elapsedTime;
+
+      // scroll progress over the hero section
+      const heroH = (heroEl?heroEl.offsetHeight:innerHeight)||innerHeight;
+      const p = Math.max(0, Math.min(1, (scrollY||window.scrollY||0)/heroH));
+
+      // cinematic cursor parallax + scroll dolly (eased)
+      const k = Math.min(1, dt*3.2);
+      camera.position.x = lerp(camera.position.x, mouse.x*1.15, k);
+      camera.position.y = lerp(camera.position.y, 0.4 + mouse.y*0.7 + p*1.2, k);
+      camera.position.z = lerp(camera.position.z, 15 - p*4.8, k);
+      camera.lookAt(0, 0.15 + p*0.5, 0);
+
+      // portal idle levitation + cursor reaction + scroll scale
+      portal.rotation.y = lerp(portal.rotation.y, mouse.x*0.16, k);
+      portal.rotation.x = lerp(portal.rotation.x, -mouse.y*0.12, k);
+      portal.position.y = Math.sin(t*0.6)*0.12;
+      portal.scale.setScalar(lerp(portal.scale.x, 1+p*0.18, k));
+      ring.rotation.z += dt*0.22; ring2.rotation.z -= dt*0.3;
+      ring.material.emissiveIntensity = 1.5 + Math.sin(t*2.1)*0.4;
+      core.material.opacity = 0.46 + Math.sin(t*2.1)*0.08;
+      portalLight.intensity = 5.5 + Math.sin(t*2.1)*1.5;
+      core.quaternion.copy(camera.quaternion);
+
+      dust.rotation.y += dt*0.02;
+      for(const b of blobs){ b.rotation.x += dt*0.12; b.rotation.y += dt*0.16; b.position.y += Math.sin(t*0.5+b.position.x)*dt*0.2; }
+
+      coinTimer += dt;
+      if(coinTimer > (mobile?0.5:0.32)){ coinTimer=0; spawnCoin(); }
+
+      for(let i=coins.length-1;i>=0;i--){
+        const c=coins[i], u=c.userData;
+        c.position.y += u.vy*dt;
+        c.rotation.x += u.rx*dt; c.rotation.z += u.rz*dt;
+        if(c.position.y<3.2){
+          c.position.x += (0-c.position.x)*Math.min(1,dt*3.4);
+          c.position.z += (0-c.position.z)*Math.min(1,dt*3.4);
+          c.scale.setScalar(THREE.MathUtils.clamp((c.position.y+0.4)/3.6,0.05,1));
+        }
+        if(c.position.y<0.05){ scene.remove(c); coins.splice(i,1); spawnToken(); if(Math.random()>0.45) spawnToken(); }
+      }
+
+      for(let i=tokens.length-1;i>=0;i--){
+        const tk=tokens[i], u=tk.userData;
+        u.life += dt;
+        tk.position.x += u.vx*dt; tk.position.y += u.vy*dt; tk.position.z += u.vz*dt;
+        u.vz *= (1-dt*0.5); u.vy -= dt*0.35;
+        tk.scale.setScalar(Math.min(1, u.life/0.35));
+        tk.quaternion.copy(camera.quaternion);
+        tk.rotateZ(Math.sin((t+u.life)*1.4)*0.05);
+        if(u.life > u.ttl-0.8){ u.fade(Math.max(0,(u.ttl-u.life)/0.8)); }
+        if(u.life>u.ttl || tk.position.z>13){ scene.remove(tk); tokens.splice(i,1); }
+      }
+
+      composer.render();
+
+      // adaptive perf: if avg frame time is high, drop dpr + disable DoF once
+      if(!adapted){ acc+=dt; frames++; if(frames>70){ if(acc/frames>0.026){ dpr=Math.max(1,dpr-0.5); renderer.setPixelRatio(dpr); renderer.setSize(W,H); composer.setSize(W,H); if(bokeh) bokeh.enabled=false; } adapted=true; } }
+    }
+    for(let i=0;i<6;i++) spawnToken();
+    animate();
+  }catch(err){
+    console.error('3D hero failed, using fallback:', err);
+    showFallback();
+  }
+}
+</script>
 
 </body>
 </html>
