@@ -11,7 +11,6 @@ import { mantle as mantleChain } from "viem/chains";
 import dynamic from "next/dynamic";
 import { adaptViemWallet } from "@reservoir0x/relay-sdk";
 import { StockyFloatingButton } from "@/components/concierge/StockyFloatingButton";
-import { StockyPanel } from "@/components/concierge/StockyPanel";
 import { LiveAnalyticsBanner } from "@/components/concierge/LiveAnalyticsBanner";
 import { SmartMoneyBadge } from "@/components/smart-money/SmartMoneyBadge";
 import { useStocky } from "@/components/concierge/StockyContext";
@@ -39,10 +38,11 @@ const BRIDGE_DEFAULT_TO = {
   logoURI: "https://ethereum-optimism.github.io/data/USDC/logo.png",
 };
 
-const CONTRACT = "0x4B02803c9Dd65dDc97Cc78530aB61281A442587F";
+const CONTRACT = "0xbbE80ACe5c46b49930ff0229762a1A57BE4CA6F4";
 // RWA / AI Yield Optimizer (USDY) — Mantle Mainnet addresses
 const USDY_ORACLE = "0xA96abbe61AfEdEB0D14a20440Ae7100D9aB4882f";
 const USDY_TOKEN = "0x5bE26527e817998A7206475496fDE1E68957c5A6";
+const METH_TOKEN = "0xcDA86A272531e8640cD7F1a92c01839911B90bb0";
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 const NANSEN_API_KEY = process.env.NEXT_PUBLIC_NANSEN_API_KEY || "";
 const ELFA_API_KEY = process.env.NEXT_PUBLIC_ELFA_API_KEY || "";
@@ -184,7 +184,7 @@ const DEMO_ELFA: ElfaTrending[] = [
   { token: "SOL", current_count: 105, change_percent: 15.38 },
 ];
 
-type TabId = "market" | "swap" | "pools" | "bridge" | "rwa" | "dashboard" | "stocky" | "education";
+type TabId = "market" | "swap" | "pools" | "bridge" | "rwa" | "dashboard" | "agent" | "education";
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "market", label: "Market", icon: "M2 12L5 7L8 9L11 4L14 8" },
@@ -193,7 +193,7 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "bridge", label: "Bridge", icon: "M2 8h12M10 4l4 4-4 4" },
   { id: "rwa", label: "RWA Strategy", icon: "M2 13h12M4 13V7M7 13V4M10 13V8M13 13V5" },
   { id: "dashboard", label: "Dashboard", icon: "M3 3h4v8H3zM9 3h4v4H9zM9 9h4v4H9z" },
-  { id: "stocky", label: "Stocky", icon: "M8 1L8 15M1 8L15 8" },
+  { id: "agent", label: "Stocky Agent", icon: "M8 1.5l5.5 3v4c0 3.2-2.3 5.3-5.5 6-3.2-.7-5.5-2.8-5.5-6v-4L8 1.5z" },
   { id: "education", label: "Education", icon: "M8 1L1 5l7 4 7-4-7-4zM1 9l7 4 7-4" },
 ];
 
@@ -643,9 +643,9 @@ export default function Home() {
               />
             </motion.div>
           )}
-          {activeTab === "stocky" && (
-            <motion.div key="stocky" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-              <StockyTabContent />
+          {activeTab === "agent" && (
+            <motion.div key="agent" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
+              <AutopilotTabContent />
             </motion.div>
           )}
           {activeTab === "education" && (
@@ -3019,74 +3019,331 @@ function EducationTab({ nansenData, nansenLoading, elfaData, elfaLoading }: {
   );
 }
 
-/* ========== STOCKY TAB ========== */
-function StockyTabContent() {
+/* ========== STOCKY AGENT (AUTOPILOT) TAB ========== */
+// On-chain Decision struct: { uint256 ts; uint8 regime; uint16 wStocks; uint16 wUSDY; uint16 wMETH; string reason }
+const AGENT_DECISION_TUPLE = {
+  name: "", type: "tuple", components: [
+    { name: "ts", type: "uint256" },
+    { name: "regime", type: "uint8" },
+    { name: "wStocks", type: "uint16" },
+    { name: "wUSDY", type: "uint16" },
+    { name: "wMETH", type: "uint16" },
+    { name: "reason", type: "string" },
+  ],
+} as const;
+const AUTOPILOT_ABI = [
+  { inputs: [], name: "getDecisionCount", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" },
+  { inputs: [{ name: "limit", type: "uint256" }], name: "getRecentDecisions", outputs: [{ ...AGENT_DECISION_TUPLE, type: "tuple[]" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "getTargetWeights", outputs: [{ name: "", type: "uint16" }, { name: "", type: "uint16" }, { name: "", type: "uint16" }], stateMutability: "view", type: "function" },
+] as const;
+
+const XSTOCK_CHOICES = ["AAPLx", "NVDAx", "SPYx", "TSLAx", "MSFTx", "GOOGLx", "AMZNx", "METAx"];
+const RISK_PROFILE_CHOICES = ["conservative", "balanced", "aggressive"];
+
+type AgentDecisionRow = { ts: bigint; regime: number; wStocks: number; wUSDY: number; wMETH: number; reason: string };
+type AutopilotStatus = {
+  enabled: boolean;
+  risk_profile: string;
+  symbols: string[];
+  interval_sec: number;
+  notional_usd: number;
+  last_run_ts: number | null;
+  next_run_ts: number | null;
+  live_swaps: boolean;
+  contract: string;
+  agent_funded: boolean;
+  last_decision: any | null;
+  decision_count: number;
+};
+
+function regimeMeta(regime: number): { label: string; text: string; bg: string; ring: string; dot: string } {
+  switch (regime) {
+    case 2: return { label: "Risk-on", text: "text-emerald-300", bg: "bg-emerald-500/10", ring: "border-emerald-500/30", dot: "#10b981" };
+    case 0: return { label: "Risk-off", text: "text-red-300", bg: "bg-red-500/10", ring: "border-red-500/30", dot: "#ef4444" };
+    default: return { label: "Neutral", text: "text-amber-300", bg: "bg-amber-500/10", ring: "border-amber-500/30", dot: "#f59e0b" };
+  }
+}
+
+function AutopilotTabContent() {
+  const pc = mantleClient; // read-only Mantle client (independent of connected wallet chain)
+  const [decisions, setDecisions] = useState<AgentDecisionRow[]>([]);
+  const [target, setTarget] = useState<[number, number, number] | null>(null);
+  const [status, setStatus] = useState<AutopilotStatus | null>(null);
+  const [backendOk, setBackendOk] = useState<boolean>(false);
+  const [loading, setLoading] = useState(true);
+  const [running, setRunning] = useState(false);
+  const [toggling, setToggling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [selSymbols, setSelSymbols] = useState<string[]>(["AAPLx", "NVDAx", "SPYx"]);
+  const [riskProfile, setRiskProfile] = useState<string>("balanced");
+  const [now, setNow] = useState<number>(Math.floor(Date.now() / 1000));
+
+  // Tick for the live countdown.
+  useEffect(() => {
+    const t = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const loadOnChain = async () => {
+    try {
+      const rows = await pc.readContract({ address: CONTRACT as `0x${string}`, abi: AUTOPILOT_ABI, functionName: "getRecentDecisions", args: [BigInt(20)] }) as readonly AgentDecisionRow[];
+      setDecisions(rows.map((r) => ({ ts: r.ts, regime: Number(r.regime), wStocks: Number(r.wStocks), wUSDY: Number(r.wUSDY), wMETH: Number(r.wMETH), reason: r.reason })));
+      const tw = await pc.readContract({ address: CONTRACT as `0x${string}`, abi: AUTOPILOT_ABI, functionName: "getTargetWeights" }) as readonly [number, number, number];
+      setTarget([Number(tw[0]), Number(tw[1]), Number(tw[2])]);
+    } catch (e) {
+      console.warn("Autopilot on-chain read failed:", e);
+    }
+  };
+
+  const loadStatus = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/autopilot/status`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as AutopilotStatus;
+      setStatus(data);
+      setBackendOk(true);
+      if (data.symbols?.length) setSelSymbols(data.symbols);
+      if (data.risk_profile) setRiskProfile(data.risk_profile);
+    } catch {
+      setBackendOk(false);
+    }
+  };
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      await Promise.all([loadOnChain(), loadStatus()]);
+      setLoading(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const toggleSymbol = (sym: string) => {
+    setSelSymbols((prev) => {
+      if (prev.includes(sym)) return prev.filter((s) => s !== sym);
+      if (prev.length >= 5) return prev;
+      return [...prev, sym];
+    });
+  };
+
+  const saveConfig = async () => {
+    setError(null); setNotice(null);
+    if (selSymbols.length < 3) { setError("Select between 3 and 5 xStocks."); return; }
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/autopilot/config`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbols: selSymbols, risk_profile: riskProfile }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setStatus(await res.json()); setBackendOk(true);
+      setNotice("Strategy saved.");
+    } catch (e: any) {
+      setError("Backend unreachable — config needs the AI agent running at " + BACKEND_URL);
+    }
+  };
+
+  const toggleMode = async () => {
+    setToggling(true); setError(null); setNotice(null);
+    try {
+      const next = !(status?.enabled);
+      const res = await fetch(`${BACKEND_URL}/api/autopilot/toggle`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setStatus(await res.json()); setBackendOk(true);
+      setNotice(next ? "Autopilot engaged — the agent will rebalance on schedule." : "Switched to Manual mode.");
+      setTimeout(loadOnChain, 1500);
+    } catch {
+      setError("Backend unreachable — Manual/Autopilot toggle needs the AI agent at " + BACKEND_URL);
+    } finally {
+      setToggling(false);
+    }
+  };
+
+  const runNow = async () => {
+    setRunning(true); setError(null); setNotice(null);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/autopilot/run`, { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json();
+      setBackendOk(true);
+      setNotice(d?.tx_hash ? "Cycle complete — decision recorded on-chain." : "Cycle complete (on-chain record skipped — no signer).");
+      await Promise.all([loadOnChain(), loadStatus()]);
+    } catch {
+      setError("Backend unreachable — 'Run now' needs the AI agent at " + BACKEND_URL);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const enabled = Boolean(status?.enabled);
+  const lastDecision = status?.last_decision;
+  const lastTxHash: string | null = lastDecision?.tx_hash ?? null;
+  const lastTxTs: number | null = lastDecision?.ts ?? null;
+
+  // Donut data from the on-chain target weights (fallback to the latest decision).
+  const weights = target ?? (decisions[0] ? [decisions[0].wStocks, decisions[0].wUSDY, decisions[0].wMETH] : null);
+  const donut = weights ? [
+    { name: "xStocks", value: weights[0] / 100 },
+    { name: "USDY", value: weights[1] / 100 },
+    { name: "mETH", value: weights[2] / 100 },
+  ] : [];
+
+  let countdown = "—";
+  if (enabled && status?.next_run_ts) {
+    const secs = Math.max(0, status.next_run_ts - now);
+    const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = secs % 60;
+    countdown = h > 0 ? `${h}h ${m}m` : `${m}m ${s}s`;
+  }
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6 min-h-[600px]">
-      {/* Left: pitch + features */}
-      <div className="space-y-5">
-        <div className="rounded-2xl bg-gradient-to-br from-emerald-500/10 via-teal-500/[0.04] to-transparent border border-emerald-500/20 p-5">
-          <div className="flex items-start gap-3">
-            <div className="shrink-0 w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center text-2xl font-bold text-black shadow-[0_8px_28px_rgba(16,185,129,0.35)]">
-              S
-            </div>
-            <div>
-              <div className="text-xl font-bold text-white/95 leading-tight">Meet Stocky</div>
-              <div className="text-[12px] text-emerald-200/80 mt-0.5 tracking-wide">
-                Your live xStocks concierge. Powered by Nansen + ELFA + AltLLM.
-              </div>
-            </div>
-          </div>
-          <p className="text-[13px] text-white/70 leading-relaxed mt-4">
-            Ask anything about xStocks &mdash; Stocky checks <span className="text-orange-300">smart-money flows on-chain</span>,
-            verified <span className="text-violet-300">KOL sentiment from crypto Twitter</span>, and live DEX prices to give you
-            answers grounded in real data, not vibes. It works in any language &mdash; just type.
-          </p>
-        </div>
+    <div className="max-w-5xl mx-auto px-4">
+      <div className="text-center mb-6">
+        <h2 className="text-xl font-bold mb-1">Stocky Agent — Autonomous RWA Yield</h2>
+        <p className="text-xs text-white/40">The agent classifies the market regime and dynamically allocates across xStocks (growth) · USDY (treasuries) · mETH (staking yield), recording every decision on-chain.</p>
+      </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <FeatureTile
-            color="orange"
-            title="Smart Money"
-            body="Who's accumulating, who's dumping — straight from Nansen's labeled wallets."
-            badge="Nansen"
-          />
-          <FeatureTile
-            color="violet"
-            title="KOL Sentiment"
-            body="Verified Twitter mentions, engagement-weighted. Catch the narrative before it moves."
-            badge="ELFA"
-          />
-          <FeatureTile
-            color="emerald"
-            title="Tool-calling AI"
-            body="Stocky calls live data tools per question — you see exactly which sources it used."
-            badge="AltLLM"
-          />
-        </div>
-
-        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
-          <div className="text-[10px] font-bold tracking-[0.18em] text-white/40 uppercase">How it works</div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[12px] text-white/75">
-            <div>
-              <div className="text-emerald-300 font-bold mb-1">1. Ask</div>
-              Type anything in your language. Stocky auto-detects RU / EN / 中文 / 日本語 and more.
-            </div>
-            <div>
-              <div className="text-emerald-300 font-bold mb-1">2. Stocky pulls live data</div>
-              You watch tools execute: Nansen netflow → ELFA sentiment → DEX price. No mocks.
-            </div>
-            <div>
-              <div className="text-emerald-300 font-bold mb-1">3. Decide</div>
-              Get a clear verdict with numbers and sources. One click to jump into Swap.
-            </div>
+      {/* Mode bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5 p-4 rounded-xl border border-white/10 bg-white/[0.02]">
+        <div className="flex items-center gap-3">
+          <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${enabled ? "bg-emerald-400" : "bg-white/30"}`}>
+            {enabled && <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping" />}
+          </span>
+          <div>
+            <div className="text-sm font-semibold text-white/90">{enabled ? "Autopilot — ON" : "Manual mode"}</div>
+            <div className="text-[10px] text-white/40">{enabled ? `Next rebalance in ${countdown}` : "Agent is idle. Toggle Autopilot or run a cycle manually."}</div>
           </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={runNow} disabled={running} className="px-3 py-2 rounded-lg text-xs font-semibold border border-white/15 bg-white/[0.04] hover:bg-white/[0.08] disabled:opacity-50">
+            {running ? "Running…" : "Run cycle now"}
+          </button>
+          <button onClick={toggleMode} disabled={toggling} className={`px-4 py-2 rounded-lg text-xs font-bold transition ${enabled ? "bg-red-500/20 text-red-200 border border-red-500/30 hover:bg-red-500/30" : "bg-emerald-500/20 text-emerald-200 border border-emerald-500/30 hover:bg-emerald-500/30"} disabled:opacity-50`}>
+            {toggling ? "…" : enabled ? "Switch to Manual" : "Engage Autopilot"}
+          </button>
         </div>
       </div>
 
-      {/* Right: live chat panel */}
-      <div>
-        <StockyPanel variant="page" />
+      {error && <div className="mb-4 p-3 rounded-lg border border-red-500/30 bg-red-500/10 text-[11px] text-red-200">{error}</div>}
+      {notice && <div className="mb-4 p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-[11px] text-emerald-200">{notice}</div>}
+
+      {/* Top grid: regime + target donut + layers */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-4 mb-5">
+        {/* Regime + target allocation */}
+        <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02]">
+          <div className="text-[10px] uppercase tracking-wide text-white/40 mb-3">Current regime & target allocation</div>
+          <div className="flex items-center gap-4">
+            <div className="w-28 h-28 shrink-0">
+              {donut.length ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={donut} dataKey="value" innerRadius={30} outerRadius={52} paddingAngle={2} stroke="none">
+                      <Cell fill="#3b82f6" /><Cell fill="#10b981" /><Cell fill="#f59e0b" />
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : <div className="w-full h-full rounded-full border border-dashed border-white/10 flex items-center justify-center text-[10px] text-white/30">No data</div>}
+            </div>
+            <div className="flex-1 space-y-2">
+              {decisions[0] && (() => { const m = regimeMeta(decisions[0].regime); return (
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border ${m.ring} ${m.bg} ${m.text}`}>
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />{m.label}
+                </span>
+              ); })()}
+              {weights ? (
+                <div className="space-y-1 text-[12px]">
+                  <div className="flex items-center justify-between"><span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-blue-500" />xStocks</span><span className="font-semibold text-white/90">{(weights[0] / 100).toFixed(0)}%</span></div>
+                  <div className="flex items-center justify-between"><span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-emerald-500" />USDY</span><span className="font-semibold text-white/90">{(weights[1] / 100).toFixed(0)}%</span></div>
+                  <div className="flex items-center justify-between"><span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-amber-500" />mETH</span><span className="font-semibold text-white/90">{(weights[2] / 100).toFixed(0)}%</span></div>
+                </div>
+              ) : <div className="text-[11px] text-white/40">No on-chain decision yet — run a cycle.</div>}
+            </div>
+          </div>
+        </div>
+
+        {/* Three layers */}
+        <div className="grid grid-cols-1 gap-3">
+          <FeatureTile color="emerald" title="xStocks — growth" body="Tokenized equities (AAPLx, NVDAx, SPYx…). Overweighted in risk-on regimes." badge="Fluxion" />
+          <FeatureTile color="violet" title="USDY — protection" body="Ondo's tokenized US Treasuries. Defensive ballast; overweighted in risk-off." badge="Ondo RWA" />
+          <FeatureTile color="orange" title="mETH — yield" body="Mantle staked-ETH yield layer held for passive staking income." badge="Mantle" />
+        </div>
+      </div>
+
+      {/* Strategy config */}
+      <div className="mb-5 p-4 rounded-xl border border-white/10 bg-white/[0.02]">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[10px] uppercase tracking-wide text-white/40">Strategy configuration</div>
+          {!backendOk && <span className="text-[9px] text-amber-300/80">backend offline · read-only</span>}
+        </div>
+        <div className="text-[11px] text-white/50 mb-2">Pick 3–5 xStocks for the growth layer ({selSymbols.length}/5)</div>
+        <div className="flex flex-wrap gap-2 mb-4">
+          {XSTOCK_CHOICES.map((sym) => {
+            const on = selSymbols.includes(sym);
+            return (
+              <button key={sym} onClick={() => toggleSymbol(sym)} className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition ${on ? "border-blue-500/40 bg-blue-500/15 text-blue-200" : "border-white/10 bg-white/[0.02] text-white/50 hover:bg-white/[0.05]"}`}>
+                {sym}
+              </button>
+            );
+          })}
+        </div>
+        <div className="text-[11px] text-white/50 mb-2">Risk profile (shifts the regime thresholds)</div>
+        <div className="flex flex-wrap items-center gap-2">
+          {RISK_PROFILE_CHOICES.map((rp) => (
+            <button key={rp} onClick={() => setRiskProfile(rp)} className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold capitalize border transition ${riskProfile === rp ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-200" : "border-white/10 bg-white/[0.02] text-white/50 hover:bg-white/[0.05]"}`}>
+              {rp}
+            </button>
+          ))}
+          <button onClick={saveConfig} className="ml-auto px-4 py-2 rounded-lg text-xs font-bold bg-blue-500/20 text-blue-200 border border-blue-500/30 hover:bg-blue-500/30">Save strategy</button>
+        </div>
+        {lastDecision?.simulated && (
+          <div className="mt-3 text-[10px] text-amber-300/80">Swaps run in <b>simulation</b> (agent wallet holds no portfolio assets). On-chain <code>recordDecision</code> is real. Fund the wallet and set <code>AUTOPILOT_LIVE_SWAPS=1</code> for live trades.</div>
+        )}
+      </div>
+
+      {/* Agent activity feed */}
+      <div className="p-4 rounded-xl border border-white/10 bg-white/[0.015]">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[10px] uppercase tracking-wide text-white/40">Agent activity — on-chain decisions</div>
+          <button onClick={loadOnChain} className="text-[10px] text-white/40 hover:text-white/70">↻ refresh</button>
+        </div>
+        {loading ? (
+          <div className="text-[12px] text-white/40 py-6 text-center">Loading on-chain history…</div>
+        ) : decisions.length === 0 ? (
+          <div className="text-[12px] text-white/40 py-6 text-center">No decisions recorded yet. Click “Run cycle now” to make the agent analyze the market and record its first decision on-chain.</div>
+        ) : (
+          <div className="space-y-2">
+            {decisions.map((d, i) => {
+              const m = regimeMeta(d.regime);
+              const when = new Date(Number(d.ts) * 1000);
+              const showTx = lastTxHash && lastTxTs !== null && Math.abs(Number(d.ts) - lastTxTs) <= 5;
+              return (
+                <div key={i} className="p-3 rounded-lg border border-white/5 bg-white/[0.02]">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border ${m.ring} ${m.bg} ${m.text}`}>
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />{m.label}
+                    </span>
+                    <span className="text-[11px] font-mono text-white/70">{(d.wStocks / 100).toFixed(0)}/{(d.wUSDY / 100).toFixed(0)}/{(d.wMETH / 100).toFixed(0)}</span>
+                    <span className="text-[9px] text-white/30">xStocks/USDY/mETH</span>
+                    <span className="ml-auto text-[10px] text-white/35">{when.toLocaleString()}</span>
+                  </div>
+                  <p className="text-[11px] text-white/65 leading-relaxed mt-2">{d.reason}</p>
+                  <div className="mt-2 flex items-center gap-3">
+                    {showTx ? (
+                      <a href={`https://mantlescan.xyz/tx/${lastTxHash}`} target="_blank" rel="noreferrer" className="text-[10px] text-blue-300 hover:text-blue-200 underline">View tx on Mantlescan</a>
+                    ) : (
+                      <a href={`https://mantlescan.xyz/address/${CONTRACT}#events`} target="_blank" rel="noreferrer" className="text-[10px] text-white/40 hover:text-white/70 underline">View on-chain</a>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div className="mt-3 text-[9px] font-mono text-white/30 break-all">
+          Contract: <a href={`https://mantlescan.xyz/address/${CONTRACT}`} target="_blank" rel="noreferrer" className="hover:text-white/60">{CONTRACT}</a>
+        </div>
       </div>
     </div>
   );
