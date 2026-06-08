@@ -165,4 +165,108 @@ describe("StockPilotAgent", function () {
       ).to.be.reverted;
     });
   });
+
+  describe("Autopilot — Autonomous RWA Yield Agent", function () {
+    // Regime: 0=RISK_OFF, 1=NEUTRAL, 2=RISK_ON
+    const NEUTRAL = 1, RISK_ON = 2, RISK_OFF = 0;
+
+    it("defaults the agent to the owner", async function () {
+      expect(await agent.agent()).to.equal(owner.address);
+    });
+
+    it("records a neutral (40/40/20) decision and exposes it via views", async function () {
+      await expect(agent.recordDecision(NEUTRAL, 4000, 4000, 2000, "Mixed signals"))
+        .to.emit(agent, "DecisionRecorded")
+        .withArgs(0, NEUTRAL, 4000, 4000, 2000, "Mixed signals", anyValueTs());
+
+      expect(await agent.getDecisionCount()).to.equal(1);
+      const d = await agent.getDecision(0);
+      expect(d.regime).to.equal(NEUTRAL);
+      expect(d.wStocks).to.equal(4000);
+      expect(d.wUSDY).to.equal(4000);
+      expect(d.wMETH).to.equal(2000);
+      expect(d.reason).to.equal("Mixed signals");
+
+      const t = await agent.getTargetWeights();
+      expect(t[0]).to.equal(4000);
+      expect(t[1]).to.equal(4000);
+      expect(t[2]).to.equal(2000);
+    });
+
+    it("records a risk-on (55/20/25) decision", async function () {
+      await agent.recordDecision(RISK_ON, 5500, 2000, 2500, "Smart money inflow, low vol");
+      const d = await agent.getLatestDecision();
+      expect(d.regime).to.equal(RISK_ON);
+      expect(d.wStocks).to.equal(5500);
+    });
+
+    it("returns recent decisions newest-first", async function () {
+      await agent.recordDecision(NEUTRAL, 4000, 4000, 2000, "first");
+      await agent.recordDecision(RISK_ON, 5500, 2000, 2500, "second");
+      const recent = await agent.getRecentDecisions(10);
+      expect(recent.length).to.equal(2);
+      expect(recent[0].reason).to.equal("second");
+      expect(recent[1].reason).to.equal("first");
+    });
+
+    it("rejects weights that do not sum to 10000", async function () {
+      await expect(agent.recordDecision(NEUTRAL, 4000, 4000, 1000, "bad"))
+        .to.be.revertedWith("Weights must sum to 10000");
+    });
+
+    it("rejects an invalid regime value", async function () {
+      await expect(agent.recordDecision(5, 4000, 4000, 2000, "bad regime"))
+        .to.be.revertedWith("Invalid regime");
+    });
+
+    it("enforces maxAssetWeight guardrail", async function () {
+      // 80% to a single layer exceeds the 70% default cap
+      await expect(agent.recordDecision(RISK_OFF, 1000, 8000, 1000, "too concentrated"))
+        .to.be.revertedWith("Asset weight exceeds guardrail");
+    });
+
+    it("enforces minUSDYWeightRiskOff in RISK_OFF", async function () {
+      // risk-off but USDY only 30% < 50% minimum
+      await expect(agent.recordDecision(RISK_OFF, 4000, 3000, 3000, "weak defense"))
+        .to.be.revertedWith("USDY below risk-off minimum");
+    });
+
+    it("accepts a compliant risk-off (20/65/15) decision", async function () {
+      await agent.recordDecision(RISK_OFF, 2000, 6500, 1500, "High vol, flight to safety");
+      const d = await agent.getLatestDecision();
+      expect(d.wUSDY).to.equal(6500);
+    });
+
+    it("allows owner to set a dedicated agent wallet and that wallet to record", async function () {
+      await expect(agent.setAgent(user.address))
+        .to.emit(agent, "AgentUpdated").withArgs(owner.address, user.address);
+      await agent.connect(user).recordDecision(NEUTRAL, 4000, 4000, 2000, "by agent");
+      expect(await agent.getDecisionCount()).to.equal(1);
+    });
+
+    it("prevents a non-agent / non-owner from recording", async function () {
+      await expect(
+        agent.connect(user).recordDecision(NEUTRAL, 4000, 4000, 2000, "unauthorized")
+      ).to.be.revertedWith("Not authorized agent");
+    });
+
+    it("lets owner update guardrails and enforces the new cap", async function () {
+      await expect(agent.setGuardrails(5000, 1500, 4000))
+        .to.emit(agent, "GuardrailsUpdated").withArgs(5000, 1500, 4000);
+      // 55% now exceeds the new 50% cap
+      await expect(agent.recordDecision(RISK_ON, 5500, 2000, 2500, "now too big"))
+        .to.be.revertedWith("Asset weight exceeds guardrail");
+    });
+
+    it("prevents non-owner from changing guardrails / agent", async function () {
+      await expect(agent.connect(user).setGuardrails(5000, 1500, 4000)).to.be.reverted;
+      await expect(agent.connect(user).setAgent(user.address)).to.be.reverted;
+    });
+  });
 });
+
+// Helper: matches any timestamp argument in event assertions.
+function anyValueTs() {
+  const { anyValue } = require("@nomicfoundation/hardhat-chai-matchers/withArgs");
+  return anyValue;
+}

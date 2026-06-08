@@ -59,6 +59,26 @@ contract StockPilotAgent is Ownable {
         uint256 timestamp;
     }
 
+    /// @notice Market regime classified by the autonomous agent.
+    enum Regime {
+        RISK_OFF, // 0 - defensive: rotate into USDY
+        NEUTRAL,  // 1 - baseline 40/40/20
+        RISK_ON   // 2 - growth: overweight xStocks
+    }
+
+    /// @notice An autonomous Autopilot rebalance decision across the three layers
+    /// (xStocks growth / USDY defensive / mETH yield). This is the on-chain
+    /// track record that benchmarks the agent ("Turing Test"). Weights are in
+    /// basis points (10000 = 100%) and must sum to 10000.
+    struct Decision {
+        uint256 ts;
+        uint8   regime;   // Regime enum value
+        uint16  wStocks;  // basis points
+        uint16  wUSDY;    // basis points
+        uint16  wMETH;    // basis points
+        string  reason;
+    }
+
     // --- State ---
 
     string public agentName;
@@ -88,6 +108,25 @@ contract StockPilotAgent is Ownable {
     // RWA / AI Yield Optimizer — history of USDY vs xStocks allocation decisions
     YieldDecision[] public yieldDecisionHistory;
 
+    // --- Autopilot (Autonomous RWA Yield Agent) ---
+
+    /// @notice Wallet of the autonomous agent allowed to record/execute decisions.
+    /// Set by the owner; defaults to the owner at deploy time.
+    address public agent;
+
+    /// @notice History of autonomous 3-layer allocation decisions.
+    Decision[] public decisionHistory;
+
+    /// @notice Most recent target weights set by the agent (basis points).
+    uint16 public targetWStocks;
+    uint16 public targetWUSDY;
+    uint16 public targetWMETH;
+
+    // Guardrails (basis points). Enforced on every recorded decision.
+    uint16 public maxAssetWeight = 7000;       // no single layer above 70%
+    uint16 public maxDrawdownBps = 2000;       // informational cap (20%) for off-chain risk engine
+    uint16 public minUSDYWeightRiskOff = 5000; // in RISK_OFF, USDY must be >= 50%
+
     // --- Events ---
 
     event AgentActionRecorded(
@@ -109,6 +148,25 @@ contract StockPilotAgent is Ownable {
         string  reason,
         uint256 timestamp
     );
+    event DecisionRecorded(
+        uint256 indexed index,
+        uint8   indexed regime,
+        uint16  wStocks,
+        uint16  wUSDY,
+        uint16  wMETH,
+        string  reason,
+        uint256 timestamp
+    );
+    event AgentUpdated(address indexed previousAgent, address indexed newAgent);
+    event GuardrailsUpdated(uint16 maxAssetWeight, uint16 maxDrawdownBps, uint16 minUSDYWeightRiskOff);
+
+    // --- Access control ---
+
+    /// @notice Restricts to the autonomous agent wallet or the owner.
+    modifier onlyAgent() {
+        require(msg.sender == agent || msg.sender == owner(), "Not authorized agent");
+        _;
+    }
 
     // --- Constructor ---
 
@@ -118,8 +176,9 @@ contract StockPilotAgent is Ownable {
         address _owner
     ) Ownable(_owner) {
         agentName = _agentName;
-        agentVersion = "1.0.0";
+        agentVersion = "2.0.0";
         stablecoin = _stablecoin;
+        agent = _owner; // owner acts as the agent until a dedicated wallet is set
 
         currentStrategy = Strategy({
             name: "Balanced Growth",
@@ -461,6 +520,105 @@ contract StockPilotAgent is Ownable {
             result[i] = yieldDecisionHistory[total - 1 - i];
         }
         return result;
+    }
+
+    // --- Autopilot: Autonomous RWA Yield Agent ---
+
+    /// @notice Set the autonomous agent wallet allowed to record/execute decisions.
+    function setAgent(address newAgent) external onlyOwner {
+        require(newAgent != address(0), "Zero agent");
+        emit AgentUpdated(agent, newAgent);
+        agent = newAgent;
+    }
+
+    /// @notice Update on-chain guardrail parameters (basis points).
+    function setGuardrails(
+        uint16 _maxAssetWeight,
+        uint16 _maxDrawdownBps,
+        uint16 _minUSDYWeightRiskOff
+    ) external onlyOwner {
+        require(_maxAssetWeight <= 10000 && _maxDrawdownBps <= 10000 && _minUSDYWeightRiskOff <= 10000, "bps > 100%");
+        maxAssetWeight = _maxAssetWeight;
+        maxDrawdownBps = _maxDrawdownBps;
+        minUSDYWeightRiskOff = _minUSDYWeightRiskOff;
+        emit GuardrailsUpdated(_maxAssetWeight, _maxDrawdownBps, _minUSDYWeightRiskOff);
+    }
+
+    /// @notice Record an autonomous 3-layer allocation decision on-chain.
+    /// @dev This is the core benchmarking primitive. Weights are basis points and
+    /// must sum to 10000. Guardrails are enforced here so the on-chain record is
+    /// always within policy. Callable by the agent wallet (or owner).
+    /// @param regime Regime enum value (0=RISK_OFF,1=NEUTRAL,2=RISK_ON)
+    /// @param wStocks xStocks weight in basis points
+    /// @param wUSDY USDY weight in basis points
+    /// @param wMETH mETH weight in basis points
+    /// @param reason AI reasoning for this allocation
+    /// @return index The index of the newly recorded decision
+    function recordDecision(
+        uint8  regime,
+        uint16 wStocks,
+        uint16 wUSDY,
+        uint16 wMETH,
+        string calldata reason
+    ) external onlyAgent returns (uint256 index) {
+        require(regime <= uint8(Regime.RISK_ON), "Invalid regime");
+        require(uint256(wStocks) + uint256(wUSDY) + uint256(wMETH) == 10000, "Weights must sum to 10000");
+        require(
+            wStocks <= maxAssetWeight && wUSDY <= maxAssetWeight && wMETH <= maxAssetWeight,
+            "Asset weight exceeds guardrail"
+        );
+        if (regime == uint8(Regime.RISK_OFF)) {
+            require(wUSDY >= minUSDYWeightRiskOff, "USDY below risk-off minimum");
+        }
+
+        decisionHistory.push(Decision({
+            ts:       block.timestamp,
+            regime:   regime,
+            wStocks:  wStocks,
+            wUSDY:    wUSDY,
+            wMETH:    wMETH,
+            reason:   reason
+        }));
+
+        targetWStocks = wStocks;
+        targetWUSDY = wUSDY;
+        targetWMETH = wMETH;
+
+        index = decisionHistory.length - 1;
+        emit DecisionRecorded(index, regime, wStocks, wUSDY, wMETH, reason, block.timestamp);
+    }
+
+    /// @notice Number of recorded autonomous decisions.
+    function getDecisionCount() external view returns (uint256) {
+        return decisionHistory.length;
+    }
+
+    /// @notice Get a single decision by index.
+    function getDecision(uint256 i) external view returns (Decision memory) {
+        require(i < decisionHistory.length, "Index out of range");
+        return decisionHistory[i];
+    }
+
+    /// @notice Get the most recent decision.
+    function getLatestDecision() external view returns (Decision memory) {
+        require(decisionHistory.length > 0, "No decisions yet");
+        return decisionHistory[decisionHistory.length - 1];
+    }
+
+    /// @notice Get the most recent decisions, newest first (capped at `limit`).
+    function getRecentDecisions(uint256 limit) external view returns (Decision[] memory) {
+        uint256 total = decisionHistory.length;
+        uint256 count = limit < total ? limit : total;
+        Decision[] memory result = new Decision[](count);
+        for (uint256 i = 0; i < count; i++) {
+            result[i] = decisionHistory[total - 1 - i];
+        }
+        return result;
+    }
+
+    /// @notice Current target weights (basis points): xStocks, USDY, mETH.
+    function getTargetWeights() external view returns (uint16, uint16, uint16) {
+        return (targetWStocks, targetWUSDY, targetWMETH);
     }
 
     // --- Internal ---
