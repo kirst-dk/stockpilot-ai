@@ -15,6 +15,7 @@ from xstocks_api.client import XStocksClient
 from fluxion.client import FluxionClient
 from agent.ai_engine import AIEngine
 from agent.portfolio_agent import PortfolioAgent, AVAILABLE_STRATEGIES, YIELD_STRATEGIES
+from agent.autopilot import autopilot, RISK_PROFILES
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 # --- On-chain config for recording RWA yield decisions ---
 MANTLE_RPC_URL = os.getenv("MANTLE_RPC_URL", "https://rpc.mantle.xyz")
 STOCKPILOT_CONTRACT_ADDRESS = os.getenv(
-    "STOCKPILOT_CONTRACT_ADDRESS", "0x16c5259964C9B2A411aB69dC9DFbcc2EbC7865A9"
+    "STOCKPILOT_CONTRACT_ADDRESS", "0xbbE80ACe5c46b49930ff0229762a1A57BE4CA6F4"
 )
 AGENT_PRIVATE_KEY = os.getenv("AGENT_PRIVATE_KEY") or os.getenv("DEPLOYER_PRIVATE_KEY")
 
@@ -141,6 +142,17 @@ class RwaStrategyRequest(BaseModel):
 
 class ExecuteRequest(BaseModel):
     recommendations: list[dict]
+
+
+class AutopilotConfigRequest(BaseModel):
+    symbols: list[str] | None = None
+    risk_profile: str | None = None
+    interval_sec: int | None = None
+    notional_usd: float | None = None
+
+
+class AutopilotToggleRequest(BaseModel):
+    enabled: bool
 
 
 # --- Endpoints ---
@@ -293,6 +305,55 @@ async def run_rwa_strategy(req: RwaStrategyRequest):
     except Exception as e:
         logger.error(f"RWA strategy error: {e}")
         raise HTTPException(500, str(e))
+
+
+# --- Autopilot: Autonomous RWA Yield Agent ---
+
+@app.get("/api/autopilot/status")
+async def autopilot_status():
+    """Current autopilot config, last/next run, and last decision."""
+    return autopilot.status()
+
+
+@app.get("/api/autopilot/profiles")
+async def autopilot_profiles():
+    """Available risk profiles (affect regime thresholds)."""
+    return {"profiles": list(RISK_PROFILES.keys()), "current": autopilot.risk_profile}
+
+
+@app.post("/api/autopilot/config")
+async def autopilot_config(req: AutopilotConfigRequest):
+    """Configure the agent: 3-5 xStocks, risk profile, interval, notional."""
+    result = autopilot.configure(
+        symbols=req.symbols,
+        risk_profile=req.risk_profile,
+        interval_sec=req.interval_sec,
+        notional_usd=req.notional_usd,
+    )
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@app.post("/api/autopilot/toggle")
+async def autopilot_toggle(req: AutopilotToggleRequest):
+    """Switch between Manual (off) and Autopilot (on). Starts/stops the rebalance loop."""
+    return autopilot.start() if req.enabled else autopilot.stop()
+
+
+@app.post("/api/autopilot/run")
+async def autopilot_run():
+    """Trigger one full autonomous cycle now (analysis -> regime -> rebalance -> recordDecision)."""
+    result = await autopilot.run_cycle(record=True)
+    if "error" in result:
+        raise HTTPException(409, result["error"])
+    return result
+
+
+@app.get("/api/autopilot/activity")
+async def autopilot_activity(limit: int = 20):
+    """Recent agent decisions (newest first) for the Agent Activity feed."""
+    return {"decisions": autopilot.history[: max(1, min(limit, 50))]}
 
 
 @app.get("/api/history")
