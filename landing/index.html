@@ -693,8 +693,10 @@ async function setupScroll(){
 }
 setupScroll();
 
-if(reduce){ showFallback(); }
-else{
+/* prefers-reduced-motion: still build the premium scene, but render a single
+   static composed frame (portal + token ring) instead of the continuous
+   animation loop — no looping motion, parallax or scroll-driven camera. */
+{
   try{
     const THREE = await import('three');
     const { EffectComposer } = await import('three/addons/postprocessing/EffectComposer.js');
@@ -906,6 +908,7 @@ else{
         }
         streamSys.aTile.needsUpdate=true;
         for(let i=0;i<6;i++) spawnToken();
+        if(reduce){ renderStatic(); }
       }catch(e){ console.warn('Token atlas/systems unavailable:', e); }
     })();
 
@@ -927,14 +930,50 @@ else{
       W=sceneWrap.clientWidth||innerWidth; H=sceneWrap.clientHeight||innerHeight;
       camera.aspect=W/H; camera.updateProjectionMatrix();
       renderer.setSize(W,H); composer.setSize(W,H);
+      if(reduce){ renderStatic(); }
     }
     window.addEventListener('resize', onResize);
 
     let running=true;
-    document.addEventListener('visibilitychange', ()=>{ running=!document.hidden; if(running){ clock.getDelta(); animate(); } });
+    document.addEventListener('visibilitychange', ()=>{ running=!document.hidden; if(running){ if(reduce){ renderStatic(); } else { clock.getDelta(); animate(); } } });
 
     let acc=0, frames=0, adapted=false;
     const streamGroupOrigin = new THREE.Vector3(0,0,0);
+
+    // Accessibility: compose one rich static frame (portal + frozen token ring),
+    // no animation, when the user prefers reduced motion.
+    function renderStatic(){
+      camera.position.set(0, 0.35, 14.4);
+      camera.lookAt(0, 0.1, 0);
+      portal.visible = true;
+      portal.position.set(0,0,0); portal.rotation.set(0,0,0); portal.scale.setScalar(1);
+      ring.material.emissiveIntensity = 1.7;
+      ring2.material.opacity = 0.5;
+      core.material.opacity = 0.5; core.quaternion.copy(camera.quaternion);
+      well.material.opacity = 0.55;
+      portalLight.intensity = 6.0;
+      if(coinMesh) coinMesh.visible = false;
+      if(heroSys) heroSys.mesh.visible = false;
+      if(streamSys && streamItems.length){
+        streamSys.mesh.visible = true;
+        const Rx=mobile?4.6:7.2, Ry=mobile?2.0:2.7, Rz=mobile?3.0:4.2, t0=0.65;
+        for(let i=0;i<STREAM_CAP;i++){
+          const it=streamItems[i]; if(!it){ continue; }
+          const ang=it.base + t0;
+          const x=Math.cos(ang)*Rx;
+          const y=Math.sin(ang)*Ry;
+          const z=Math.sin(ang)*Rz - 1.5;
+          dummy.position.set(x,y,z);
+          dummy.quaternion.copy(camera.quaternion);
+          const depthScale = 0.9 + (z+Rz+1.5)/(2*Rz)*0.35;
+          dummy.scale.setScalar(depthScale);
+          dummy.updateMatrix(); streamSys.mesh.setMatrixAt(i,dummy.matrix);
+          streamSys.aOp.array[i]=1;
+        }
+        streamSys.mesh.instanceMatrix.needsUpdate=true; streamSys.aOp.needsUpdate=true;
+      }
+      composer.render();
+    }
 
     function animate(){
       if(!running) return;
@@ -1053,7 +1092,7 @@ else{
       // adaptive perf: if avg frame time is high, drop dpr + disable DoF once
       if(!adapted){ acc+=dt; frames++; if(frames>70){ if(acc/frames>0.026){ dpr=Math.max(1,dpr-0.5); renderer.setPixelRatio(dpr); renderer.setSize(W,H); composer.setSize(W,H); if(bokeh) bokeh.enabled=false; } adapted=true; } }
     }
-    animate();
+    if(reduce){ renderStatic(); } else { animate(); }
   }catch(err){
     console.error('3D scene failed, using fallback:', err);
     showFallback();
