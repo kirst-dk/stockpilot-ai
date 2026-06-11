@@ -708,7 +708,7 @@ setupScroll();
     let W = sceneWrap.clientWidth || innerWidth, H = sceneWrap.clientHeight || innerHeight;
     const mobile = W < 760;
     let BokehPass = null;
-    if(!mobile){ try{ BokehPass = (await import('three/addons/postprocessing/BokehPass.js')).BokehPass; }catch(e){} }
+    if(!mobile && !reduce){ try{ BokehPass = (await import('three/addons/postprocessing/BokehPass.js')).BokehPass; }catch(e){} }
 
     const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true, powerPreference:'high-performance' });
     let dpr = Math.min(devicePixelRatio||1, mobile?1.5:2);
@@ -770,20 +770,23 @@ setupScroll();
 
     // ---- Background "liquid" glass blobs (transmission) for depth/atmosphere ----
     const blobs=[];
-    if(!mobile){
+    if(!mobile && !reduce){
       const blobMat = new THREE.MeshPhysicalMaterial({ color:0x2be8a6, metalness:0, roughness:0.06, transmission:0.95, thickness:2.2, ior:1.35, iridescence:1, iridescenceIOR:1.3, envMapIntensity:1.2, transparent:true });
       const blobMat2 = blobMat.clone(); blobMat2.color=new THREE.Color(0x4d8dff);
       const b1 = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4, 6), blobMat); b1.position.set(-7.5,3,-9); scene.add(b1); blobs.push(b1);
       const b2 = new THREE.Mesh(new THREE.IcosahedronGeometry(1.9, 6), blobMat2); b2.position.set(8,-3.5,-11); scene.add(b2); blobs.push(b2);
     }
 
-    // ---- Particle dust for depth ----
-    const dustGeo = new THREE.BufferGeometry();
-    const N = mobile?160:380; const dpos=new Float32Array(N*3);
-    for(let i=0;i<N;i++){ dpos[i*3]=(Math.random()-0.5)*30; dpos[i*3+1]=(Math.random()-0.5)*18; dpos[i*3+2]=(Math.random()-0.5)*16-3; }
-    dustGeo.setAttribute('position', new THREE.BufferAttribute(dpos,3));
-    const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color:0x8fe6c8, size:0.03, transparent:true, opacity:0.5, depthWrite:false }));
-    scene.add(dust);
+    // ---- Particle dust for depth (skipped under reduced-motion to lighten the static frame) ----
+    let dust = null;
+    if(!reduce){
+      const dustGeo = new THREE.BufferGeometry();
+      const N = mobile?160:380; const dpos=new Float32Array(N*3);
+      for(let i=0;i<N;i++){ dpos[i*3]=(Math.random()-0.5)*30; dpos[i*3+1]=(Math.random()-0.5)*18; dpos[i*3+2]=(Math.random()-0.5)*16-3; }
+      dustGeo.setAttribute('position', new THREE.BufferAttribute(dpos,3));
+      dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color:0x8fe6c8, size:0.03, transparent:true, opacity:0.5, depthWrite:false }));
+      scene.add(dust);
+    }
 
     // ---- Token ticker config (from xStocks; extend freely) ----
     const TICKERS = ['SPYx','QQQx','NVDAx','AAPLx','MSFTx','TSLAx','METAx','GOOGLx','AMZNx','COINx','HOODx','MSTRx','CRCLx','NFLXx','PLTRx','AMDx','AVGOx','CRMx'];
@@ -913,13 +916,18 @@ setupScroll();
     })();
 
     // ---- Postprocessing: Render → DoF(Bokeh) → Bloom → Output(ACES) ----
-    const composer = new EffectComposer(renderer);
-    composer.addPass(new RenderPass(scene, camera));
-    let bokeh=null;
-    if(BokehPass){ bokeh = new BokehPass(scene, camera, { focus:15.0, aperture:0.0006, maxblur:0.004 }); composer.addPass(bokeh); }
-    const bloom = new UnrealBloomPass(new THREE.Vector2(W,H), mobile?0.6:0.9, 0.6, 0.78);
-    composer.addPass(bloom);
-    composer.addPass(new OutputPass());
+    // Under reduced-motion we skip the whole post-processing chain and render the
+    // single static frame directly (the renderer still applies ACES tone mapping +
+    // sRGB), avoiding the bloom mip chain + DoF cost for a one-shot frame.
+    let composer=null, bokeh=null, bloom=null;
+    if(!reduce){
+      composer = new EffectComposer(renderer);
+      composer.addPass(new RenderPass(scene, camera));
+      if(BokehPass){ bokeh = new BokehPass(scene, camera, { focus:15.0, aperture:0.0006, maxblur:0.004 }); composer.addPass(bokeh); }
+      bloom = new UnrealBloomPass(new THREE.Vector2(W,H), mobile?0.6:0.9, 0.6, 0.78);
+      composer.addPass(bloom);
+      composer.addPass(new OutputPass());
+    }
 
     const clock = new THREE.Clock();
     let coinTimer=0;
@@ -929,7 +937,7 @@ setupScroll();
     function onResize(){
       W=sceneWrap.clientWidth||innerWidth; H=sceneWrap.clientHeight||innerHeight;
       camera.aspect=W/H; camera.updateProjectionMatrix();
-      renderer.setSize(W,H); composer.setSize(W,H);
+      renderer.setSize(W,H); if(composer){ composer.setSize(W,H); }
       if(reduce){ renderStatic(); }
     }
     window.addEventListener('resize', onResize);
@@ -947,9 +955,9 @@ setupScroll();
       camera.lookAt(0, 0.1, 0);
       portal.visible = true;
       portal.position.set(0,0,0); portal.rotation.set(0,0,0); portal.scale.setScalar(1);
-      ring.material.emissiveIntensity = 1.7;
-      ring2.material.opacity = 0.5;
-      core.material.opacity = 0.5; core.quaternion.copy(camera.quaternion);
+      ring.material.emissiveIntensity = 2.4;
+      ring2.material.opacity = 0.55;
+      core.material.opacity = 0.62; core.quaternion.copy(camera.quaternion);
       well.material.opacity = 0.55;
       portalLight.intensity = 6.0;
       if(coinMesh) coinMesh.visible = false;
@@ -972,7 +980,7 @@ setupScroll();
         }
         streamSys.mesh.instanceMatrix.needsUpdate=true; streamSys.aOp.needsUpdate=true;
       }
-      composer.render();
+      if(composer){ composer.render(); } else { renderer.render(scene, camera); }
     }
 
     function animate(){
