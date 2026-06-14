@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo, createContext, useContext } from "react";
 import { createPortal } from "react-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import { useRouter } from "next/navigation";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useBalance, useWalletClient, usePublicClient } from "wagmi";
@@ -10,8 +10,6 @@ import { formatEther, encodeFunctionData, createPublicClient, http as viemHttp }
 import { mantle as mantleChain } from "viem/chains";
 import dynamic from "next/dynamic";
 import { adaptViemWallet } from "@reservoir0x/relay-sdk";
-import { StockyFloatingButton } from "@/components/concierge/StockyFloatingButton";
-import { LiveAnalyticsBanner } from "@/components/concierge/LiveAnalyticsBanner";
 import { SmartMoneyBadge } from "@/components/smart-money/SmartMoneyBadge";
 import { useStocky } from "@/components/concierge/StockyContext";
 import { setXStockCatalog } from "@/lib/intelligence/xstocks";
@@ -197,8 +195,27 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "education", label: "Education", icon: "M8 1L1 5l7 4 7-4-7-4zM1 9l7 4 7-4" },
 ];
 
-export default function Home() {
-  const [activeTab, setActiveTab] = useState<TabId>("market");
+const ROUTE_FOR_TAB: Record<TabId, string> = {
+  market: "/market", swap: "/swap", pools: "/swap", bridge: "/bridge",
+  rwa: "/strategies", dashboard: "/portfolio", agent: "/", education: "/education",
+};
+
+const AppDataContext = createContext<ReturnType<typeof useAppDataState> | null>(null);
+
+export function useAppData() {
+  const ctx = useContext(AppDataContext);
+  if (!ctx) throw new Error("useAppData must be used within AppDataProvider");
+  return ctx;
+}
+
+export function AppDataProvider({ children }: { children: React.ReactNode }) {
+  const value = useAppDataState();
+  return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>;
+}
+
+function useAppDataState() {
+  const router = useRouter();
+  const setActiveTab = useCallback((t: TabId) => { router.push(ROUTE_FOR_TAB[t]); }, [router]);
   const [activeStrategy, setActiveStrategy] = useState(0);
   const [nansenData, setNansenData] = useState<NansenToken[]>(DEMO_NANSEN);
   const [elfaData, setElfaData] = useState<ElfaTrending[]>(DEMO_ELFA);
@@ -498,268 +515,31 @@ export default function Home() {
     setChatLoading(false);
   }, [chatInput, chatLoading, chatMessages, getFallbackResponse, allXStocks.length]);
 
-  return (
-    <div className="min-h-screen bg-[#0a0e1a] text-white flex flex-col">
-      {/* Background */}
-      <div className="fixed inset-0 -z-10 opacity-[0.02]" style={{ backgroundImage: "linear-gradient(rgba(255,255,255,.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.1) 1px, transparent 1px)", backgroundSize: "60px 60px" }} />
-
-      {/* Top navbar */}
-      <nav className="sticky top-0 z-50 border-b border-white/5 bg-[#0a0e1a]/90 backdrop-blur-xl">
-        <div className="max-w-[1400px] mx-auto px-4 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 12L5 7L8 9L11 4L14 8" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            </div>
-            <span className="font-bold text-base tracking-tight">STOCKPILOT</span>
-            <span className="text-[9px] font-medium text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded-full border border-blue-500/20">AI</span>
-          </div>
-
-          {/* Tab navigation */}
-          <div className="hidden md:flex items-center gap-1">
-            {TABS.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
-                  activeTab === tab.id
-                    ? "bg-white/10 text-white"
-                    : "text-white/40 hover:text-white/70 hover:bg-white/5"
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-3">
-            <a href={`https://mantlescan.xyz/address/${CONTRACT}`} target="_blank" rel="noreferrer" className="hidden md:flex items-center gap-1.5 text-[10px] text-emerald-400/80 hover:text-emerald-400 transition-colors">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Mainnet
-            </a>
-            <ConnectButton.Custom>
-              {({ account, chain, openConnectModal, openAccountModal, mounted }) => {
-                const connected = mounted && account && chain;
-                return (
-                  <button
-                    onClick={connected ? openAccountModal : openConnectModal}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                      connected
-                        ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
-                        : "bg-white text-black hover:bg-white/90"
-                    }`}
-                  >
-                    {connected ? account.displayName : "Connect Wallet"}
-                  </button>
-                );
-              }}
-            </ConnectButton.Custom>
-          </div>
-        </div>
-
-        {/* Mobile tab bar */}
-        <div className="md:hidden flex items-center gap-1 px-2 pb-2 overflow-x-auto">
-          {TABS.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-3 py-1.5 rounded-lg text-[10px] font-medium whitespace-nowrap transition-all ${
-                activeTab === tab.id ? "bg-white/10 text-white" : "text-white/40"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </nav>
-
-      {/* Main content */}
-      <main className="flex-1 max-w-[1400px] mx-auto w-full px-4 py-6">
-        <div className="mb-4">
-          <LiveAnalyticsBanner />
-        </div>
-        <AnimatePresence mode="wait">
-          {activeTab === "market" && (
-            <motion.div key="market" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-              <MarketTab
-                strategies={STRATEGIES}
-                activeStrategy={activeStrategy}
-                setActiveStrategy={setActiveStrategy}
-                strategyAiInfo={strategyAiInfo}
-                strategyAiLoading={strategyAiLoading}
-                getStrategyAiInfo={getStrategyAiInfo}
-                allXStocks={allXStocks}
-                xStocksLoading={xStocksLoading}
-                filteredXStocks={filteredXStocks}
-                xStocksFilter={xStocksFilter}
-                setXStocksFilter={setXStocksFilter}
-                xStocksCategory={xStocksCategory}
-                setXStocksCategory={setXStocksCategory}
-                aiStockInfo={aiStockInfo}
-                aiStockLoading={aiStockLoading}
-                getStockAiInfo={getStockAiInfo}
-                setActiveTab={setActiveTab}
-              />
-            </motion.div>
-          )}
-          {activeTab === "swap" && (
-            <motion.div key="swap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-              <SwapTab walletClient={walletClient} isConnected={isConnected} address={address} allXStocks={allXStocks} publicClient={publicClient} />
-            </motion.div>
-          )}
-          {activeTab === "pools" && (
-            <motion.div key="pools" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-              <PoolsTab walletClient={walletClient} isConnected={isConnected} address={address} allXStocks={allXStocks} />
-            </motion.div>
-          )}
-          {activeTab === "bridge" && (
-            <motion.div key="bridge" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-              <BridgeTab walletClient={walletClient} onConnectWallet={() => {}} />
-            </motion.div>
-          )}
-          {activeTab === "rwa" && (
-            <motion.div key="rwa" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-              <RwaStrategyTab />
-            </motion.div>
-          )}
-          {activeTab === "dashboard" && (
-            <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-              <DashboardTab
-                isConnected={isConnected}
-                address={address}
-                balance={balance}
-                portfolioSelected={portfolioSelected}
-                selectedStrategy={selectedStrategy}
-                strategy={strategy}
-                totalAllocation={totalAllocation}
-                selectedCount={selectedCount}
-                toggleXStock={toggleXStock}
-                updateAllocation={updateAllocation}
-                applyAiStrategy={applyAiStrategy}
-                analyzePortfolio={analyzePortfolio}
-                aiAnalysis={aiAnalysis}
-                aiAnalyzing={aiAnalyzing}
-                allXStocks={allXStocks}
-                setActiveTab={setActiveTab}
-              />
-            </motion.div>
-          )}
-          {activeTab === "agent" && (
-            <motion.div key="agent" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-              <AutopilotTabContent />
-            </motion.div>
-          )}
-          {activeTab === "education" && (
-            <motion.div key="education" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-              <EducationTab nansenData={nansenData} nansenLoading={nansenLoading} elfaData={elfaData} elfaLoading={elfaLoading} />
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </main>
-
-      {/* Stocky AI Concierge */}
-      <StockyFloatingButton />
-
-      {/* Legacy chat widget (hidden, kept for now in case of fallback) */}
-      <div className="fixed bottom-5 right-5 z-[90] hidden" aria-hidden="true">
-        <AnimatePresence>
-          {chatOpen && (
-            <motion.div
-              initial={{ opacity: 0, y: 20, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 20, scale: 0.95 }}
-              className="absolute bottom-14 right-0 w-[360px] h-[460px] bg-[#0d1220] border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
-            >
-              <div className="px-4 py-3 border-b border-white/5 bg-gradient-to-r from-violet-500/10 to-blue-500/10 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center">
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="white" strokeWidth="1.5" strokeLinecap="round"/></svg>
-                  </div>
-                  <div>
-                    <div className="text-xs font-semibold text-white/90">StockPilot AI</div>
-                    <div className="text-[8px] text-white/40">Nansen + ELFA + AltLLM</div>
-                  </div>
-                </div>
-                <button onClick={() => setChatOpen(false)} className="w-6 h-6 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/40 hover:text-white/70 transition-colors">
-                  <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                {chatMessages.length === 0 && (
-                  <div className="text-center py-6">
-                    <p className="text-xs text-white/40 mb-3">Ask about strategies, risks, or tokens</p>
-                    {["What strategy do you recommend?", "Analyze NVDAx", "Compare risk levels"].map((q, i) => (
-                      <button key={i} onClick={() => setChatInput(q)} className="block w-full text-left px-3 py-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-[10px] text-white/50 hover:text-white/70 hover:bg-white/[0.06] transition-colors mb-1.5">
-                        {q}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {chatMessages.map((msg, i) => (
-                  <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[85%] px-3 py-2 rounded-xl text-xs whitespace-pre-wrap ${
-                      msg.role === "user" ? "bg-blue-600/20 text-white/90 border border-blue-500/20" : "bg-white/[0.04] text-white/70 border border-white/5"
-                    }`}>{msg.content}</div>
-                  </div>
-                ))}
-                {chatLoading && (
-                  <div className="flex justify-start">
-                    <div className="px-3 py-2 rounded-xl bg-white/[0.04] border border-white/5">
-                      <div className="flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-white/30 animate-bounce" style={{ animationDelay: "0ms" }} />
-                        <span className="w-1.5 h-1.5 rounded-full bg-white/30 animate-bounce" style={{ animationDelay: "150ms" }} />
-                        <span className="w-1.5 h-1.5 rounded-full bg-white/30 animate-bounce" style={{ animationDelay: "300ms" }} />
-                      </div>
-                    </div>
-                  </div>
-                )}
-                <div ref={chatEndRef} />
-              </div>
-              <div className="p-3 border-t border-white/5">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleChat()}
-                    placeholder="Ask about strategy, risk, or tokens..."
-                    className="flex-1 bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-xs text-white/90 placeholder:text-white/30 focus:outline-none focus:border-blue-500/50"
-                  />
-                  <button onClick={handleChat} disabled={chatLoading || !chatInput.trim()}
-                    className="w-8 h-8 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 flex items-center justify-center text-white disabled:opacity-30 transition-all">
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 8l12-6-4 14-3-5-5-3z" fill="currentColor"/></svg>
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-        <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setChatOpen(!chatOpen)}
-          className={`w-12 h-12 rounded-full shadow-2xl flex items-center justify-center transition-all ${chatOpen ? "bg-white/10 border border-white/20" : "bg-gradient-to-r from-blue-600 to-indigo-600 shadow-blue-500/30"}`}>
-          {chatOpen ? (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="white" strokeWidth="2" strokeLinecap="round"/></svg>
-          ) : (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="white" strokeWidth="1.5" strokeLinecap="round"/></svg>
-          )}
-        </motion.button>
-      </div>
-
-      {/* Footer */}
-      <footer className="border-t border-white/5 bg-black/20 mt-auto">
-        <div className="max-w-[1400px] mx-auto px-4 py-4 flex flex-col md:flex-row items-center justify-between gap-3">
-          <div className="text-[10px] text-white/30">STOCKPILOT AI · Mantle Turing Test 2026</div>
-          <div className="flex items-center gap-4 text-[10px] text-white/30">
-            <a href="https://dorahacks.io/buidl/43884" target="_blank" rel="noreferrer" className="hover:text-white/60 transition-colors">DoraHacks</a>
-            <a href="https://github.com/kirst-dk/stockpilot-ai" target="_blank" rel="noreferrer" className="hover:text-white/60 transition-colors">GitHub</a>
-            <a href="https://stockpilotai.xyz" target="_blank" rel="noreferrer" className="hover:text-white/60 transition-colors">Website</a>
-            <a href="https://mantle.xyz" target="_blank" rel="noreferrer" className="hover:text-white/60 transition-colors">Mantle</a>
-          </div>
-        </div>
-      </footer>
-    </div>
-  );
+  return {
+    setActiveTab,
+    // strategy
+    strategies: STRATEGIES, activeStrategy, setActiveStrategy, strategy,
+    strategyAiInfo, strategyAiLoading, getStrategyAiInfo,
+    selectedStrategy, applyAiStrategy,
+    // xstocks
+    allXStocks, xStocksLoading, filteredXStocks,
+    xStocksFilter, setXStocksFilter, xStocksCategory, setXStocksCategory,
+    aiStockInfo, aiStockLoading, getStockAiInfo,
+    // wallet
+    address, isConnected, balance, walletClient, publicClient,
+    // portfolio builder
+    portfolioSelected, totalAllocation, selectedCount,
+    toggleXStock, updateAllocation, analyzePortfolio, aiAnalysis, aiAnalyzing,
+    // education / intelligence
+    nansenData, nansenLoading, elfaData, elfaLoading,
+    // legacy chat (kept for floating widget reuse)
+    chatOpen, setChatOpen, chatMessages, chatInput, setChatInput, chatLoading, handleChat, chatEndRef,
+  };
 }
 
 
 /* ========== MARKET TAB ========== */
-function MarketTab({
+export function MarketTab({
   strategies, activeStrategy, setActiveStrategy, strategyAiInfo, strategyAiLoading, getStrategyAiInfo,
   allXStocks, xStocksLoading, filteredXStocks, xStocksFilter, setXStocksFilter, xStocksCategory, setXStocksCategory,
   aiStockInfo, aiStockLoading, getStockAiInfo, setActiveTab,
@@ -1137,7 +917,7 @@ function gradientFor(symbol: string): string {
   return ICON_GRADIENTS[h % ICON_GRADIENTS.length];
 }
 
-function TokenIcon({ token, size = 28 }: { token: { symbol: string; logo?: string }; size?: number }) {
+export function TokenIcon({ token, size = 28 }: { token: { symbol: string; logo?: string }; size?: number }) {
   const [failed, setFailed] = useState(false);
   const dim = { width: size, height: size };
   if (token.logo && !failed) {
@@ -1165,7 +945,7 @@ function TokenIcon({ token, size = 28 }: { token: { symbol: string; logo?: strin
 
 // Stable, module-scope token picker rendered through a portal so parent re-renders
 // (e.g. the 5s LiveBrief tick) never remount it — keeping search focus & scroll intact.
-function TokenSelectorModal({
+export function TokenSelectorModal({
   open, onClose, tokens, onSelect, search, setSearch, customAddress, setCustomAddress, onAddCustom, excludeAddress, selectedAddress,
 }: {
   open: boolean;
@@ -1257,7 +1037,7 @@ function TokenSelectorModal({
   );
 }
 
-function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient }: { walletClient: any; isConnected: boolean; address: string | undefined; allXStocks: XStockAsset[]; publicClient: any }) {
+export function SwapTab({ walletClient, isConnected, address, allXStocks, publicClient }: { walletClient: any; isConnected: boolean; address: string | undefined; allXStocks: XStockAsset[]; publicClient: any }) {
   const [inputAmount, setInputAmount] = useState("");
   const [outputAmount, setOutputAmount] = useState("");
   const [inputToken, setInputToken] = useState<SwapToken>(BASE_TOKENS[1]);
@@ -1795,7 +1575,7 @@ const fmtPrice = (n: number): string => {
 };
 const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
-function CopyAddress({ address, label }: { address: string; label?: string }) {
+export function CopyAddress({ address, label }: { address: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -1812,7 +1592,7 @@ function CopyAddress({ address, label }: { address: string; label?: string }) {
   );
 }
 
-function PoolsTab({ walletClient, isConnected, address, allXStocks }: { walletClient: any; isConnected: boolean; address: string | undefined; allXStocks: XStockAsset[] }) {
+export function PoolsTab({ walletClient, isConnected, address, allXStocks }: { walletClient: any; isConnected: boolean; address: string | undefined; allXStocks: XStockAsset[] }) {
   const [pools, setPools] = useState<PoolInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -2307,7 +2087,7 @@ const RWA_CONTRACT_ABI = [
 type YieldDecisionRow = { usdyPct: number; stocksPct: number; reason: string; usdyYieldBps: bigint; timestamp: bigint };
 type RwaDecision = { usdy_pct: number; stocks_pct: number; reason: string; usdy_yield_pct: number; sentiment_score: number; tx_hash: string | null };
 
-function RwaStrategyTab() {
+export function RwaStrategyTab() {
   // Use the shared module-level Mantle client (read-only, independent of the
   // connected wallet's active chain — usePublicClient() defaults to ETH mainnet).
   const publicClient = mantleClient;
@@ -2516,7 +2296,7 @@ function RwaStrategyTab() {
 }
 
 /* ========== BRIDGE TAB ========== */
-function BridgeTab({ walletClient, onConnectWallet }: { walletClient: any; onConnectWallet?: () => void }) {
+export function BridgeTab({ walletClient, onConnectWallet }: { walletClient: any; onConnectWallet?: () => void }) {
   const [fromToken, setFromToken] = useState<any>(BRIDGE_DEFAULT_FROM);
   const [toToken, setToToken] = useState<any>(BRIDGE_DEFAULT_TO);
 
@@ -2605,7 +2385,7 @@ function BridgeTab({ walletClient, onConnectWallet }: { walletClient: any; onCon
 
 
 /* ========== DASHBOARD TAB ========== */
-function DashboardTab({
+export function DashboardTab({
   isConnected, address, balance, portfolioSelected, selectedStrategy, strategy,
   totalAllocation, selectedCount, toggleXStock, updateAllocation, applyAiStrategy,
   analyzePortfolio, aiAnalysis, aiAnalyzing, allXStocks, setActiveTab,
@@ -2800,7 +2580,7 @@ function DashboardTab({
 
 
 /* ========== EDUCATION TAB ========== */
-function EducationTab({ nansenData, nansenLoading, elfaData, elfaLoading }: {
+export function EducationTab({ nansenData, nansenLoading, elfaData, elfaLoading }: {
   nansenData: NansenToken[]; nansenLoading: boolean; elfaData: ElfaTrending[]; elfaLoading: boolean;
 }) {
   return (
@@ -3064,7 +2844,7 @@ function regimeMeta(regime: number): { label: string; text: string; bg: string; 
   }
 }
 
-function AutopilotTabContent() {
+export function AutopilotTabContent() {
   const pc = mantleClient; // read-only Mantle client (independent of connected wallet chain)
   const [decisions, setDecisions] = useState<AgentDecisionRow[]>([]);
   const [target, setTarget] = useState<[number, number, number] | null>(null);
@@ -3349,7 +3129,7 @@ function AutopilotTabContent() {
   );
 }
 
-function FeatureTile({ color, title, body, badge }: { color: "orange" | "violet" | "emerald"; title: string; body: string; badge: string }) {
+export function FeatureTile({ color, title, body, badge }: { color: "orange" | "violet" | "emerald"; title: string; body: string; badge: string }) {
   const palette: Record<string, { ring: string; bg: string; text: string; pill: string }> = {
     orange:  { ring: "border-orange-500/25",  bg: "bg-orange-500/[0.04]",  text: "text-orange-300",  pill: "bg-orange-500/15 text-orange-200" },
     violet:  { ring: "border-violet-500/25",  bg: "bg-violet-500/[0.04]",  text: "text-violet-300",  pill: "bg-violet-500/15 text-violet-200" },
