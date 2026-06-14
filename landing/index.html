@@ -693,8 +693,10 @@ async function setupScroll(){
 }
 setupScroll();
 
-if(reduce){ showFallback(); }
-else{
+/* prefers-reduced-motion: still build the premium scene, but render a single
+   static composed frame (portal + token ring) instead of the continuous
+   animation loop — no looping motion, parallax or scroll-driven camera. */
+{
   try{
     const THREE = await import('three');
     const { EffectComposer } = await import('three/addons/postprocessing/EffectComposer.js');
@@ -706,7 +708,7 @@ else{
     let W = sceneWrap.clientWidth || innerWidth, H = sceneWrap.clientHeight || innerHeight;
     const mobile = W < 760;
     let BokehPass = null;
-    if(!mobile){ try{ BokehPass = (await import('three/addons/postprocessing/BokehPass.js')).BokehPass; }catch(e){} }
+    if(!mobile && !reduce){ try{ BokehPass = (await import('three/addons/postprocessing/BokehPass.js')).BokehPass; }catch(e){} }
 
     const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true, powerPreference:'high-performance' });
     let dpr = Math.min(devicePixelRatio||1, mobile?1.5:2);
@@ -768,20 +770,23 @@ else{
 
     // ---- Background "liquid" glass blobs (transmission) for depth/atmosphere ----
     const blobs=[];
-    if(!mobile){
+    if(!mobile && !reduce){
       const blobMat = new THREE.MeshPhysicalMaterial({ color:0x2be8a6, metalness:0, roughness:0.06, transmission:0.95, thickness:2.2, ior:1.35, iridescence:1, iridescenceIOR:1.3, envMapIntensity:1.2, transparent:true });
       const blobMat2 = blobMat.clone(); blobMat2.color=new THREE.Color(0x4d8dff);
       const b1 = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4, 6), blobMat); b1.position.set(-7.5,3,-9); scene.add(b1); blobs.push(b1);
       const b2 = new THREE.Mesh(new THREE.IcosahedronGeometry(1.9, 6), blobMat2); b2.position.set(8,-3.5,-11); scene.add(b2); blobs.push(b2);
     }
 
-    // ---- Particle dust for depth ----
-    const dustGeo = new THREE.BufferGeometry();
-    const N = mobile?160:380; const dpos=new Float32Array(N*3);
-    for(let i=0;i<N;i++){ dpos[i*3]=(Math.random()-0.5)*30; dpos[i*3+1]=(Math.random()-0.5)*18; dpos[i*3+2]=(Math.random()-0.5)*16-3; }
-    dustGeo.setAttribute('position', new THREE.BufferAttribute(dpos,3));
-    const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color:0x8fe6c8, size:0.03, transparent:true, opacity:0.5, depthWrite:false }));
-    scene.add(dust);
+    // ---- Particle dust for depth (skipped under reduced-motion to lighten the static frame) ----
+    let dust = null;
+    if(!reduce){
+      const dustGeo = new THREE.BufferGeometry();
+      const N = mobile?160:380; const dpos=new Float32Array(N*3);
+      for(let i=0;i<N;i++){ dpos[i*3]=(Math.random()-0.5)*30; dpos[i*3+1]=(Math.random()-0.5)*18; dpos[i*3+2]=(Math.random()-0.5)*16-3; }
+      dustGeo.setAttribute('position', new THREE.BufferAttribute(dpos,3));
+      dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color:0x8fe6c8, size:0.03, transparent:true, opacity:0.5, depthWrite:false }));
+      scene.add(dust);
+    }
 
     // ---- Token ticker config (from xStocks; extend freely) ----
     const TICKERS = ['SPYx','QQQx','NVDAx','AAPLx','MSFTx','TSLAx','METAx','GOOGLx','AMZNx','COINx','HOODx','MSTRx','CRCLx','NFLXx','PLTRx','AMDx','AVGOx','CRMx'];
@@ -906,17 +911,23 @@ else{
         }
         streamSys.aTile.needsUpdate=true;
         for(let i=0;i<6;i++) spawnToken();
+        if(reduce){ renderStatic(); }
       }catch(e){ console.warn('Token atlas/systems unavailable:', e); }
     })();
 
     // ---- Postprocessing: Render → DoF(Bokeh) → Bloom → Output(ACES) ----
-    const composer = new EffectComposer(renderer);
-    composer.addPass(new RenderPass(scene, camera));
-    let bokeh=null;
-    if(BokehPass){ bokeh = new BokehPass(scene, camera, { focus:15.0, aperture:0.0006, maxblur:0.004 }); composer.addPass(bokeh); }
-    const bloom = new UnrealBloomPass(new THREE.Vector2(W,H), mobile?0.6:0.9, 0.6, 0.78);
-    composer.addPass(bloom);
-    composer.addPass(new OutputPass());
+    // Under reduced-motion we skip the whole post-processing chain and render the
+    // single static frame directly (the renderer still applies ACES tone mapping +
+    // sRGB), avoiding the bloom mip chain + DoF cost for a one-shot frame.
+    let composer=null, bokeh=null, bloom=null;
+    if(!reduce){
+      composer = new EffectComposer(renderer);
+      composer.addPass(new RenderPass(scene, camera));
+      if(BokehPass){ bokeh = new BokehPass(scene, camera, { focus:15.0, aperture:0.0006, maxblur:0.004 }); composer.addPass(bokeh); }
+      bloom = new UnrealBloomPass(new THREE.Vector2(W,H), mobile?0.6:0.9, 0.6, 0.78);
+      composer.addPass(bloom);
+      composer.addPass(new OutputPass());
+    }
 
     const clock = new THREE.Clock();
     let coinTimer=0;
@@ -926,15 +937,51 @@ else{
     function onResize(){
       W=sceneWrap.clientWidth||innerWidth; H=sceneWrap.clientHeight||innerHeight;
       camera.aspect=W/H; camera.updateProjectionMatrix();
-      renderer.setSize(W,H); composer.setSize(W,H);
+      renderer.setSize(W,H); if(composer){ composer.setSize(W,H); }
+      if(reduce){ renderStatic(); }
     }
     window.addEventListener('resize', onResize);
 
     let running=true;
-    document.addEventListener('visibilitychange', ()=>{ running=!document.hidden; if(running){ clock.getDelta(); animate(); } });
+    document.addEventListener('visibilitychange', ()=>{ running=!document.hidden; if(running){ if(reduce){ renderStatic(); } else { clock.getDelta(); animate(); } } });
 
     let acc=0, frames=0, adapted=false;
     const streamGroupOrigin = new THREE.Vector3(0,0,0);
+
+    // Accessibility: compose one rich static frame (portal + frozen token ring),
+    // no animation, when the user prefers reduced motion.
+    function renderStatic(){
+      camera.position.set(0, 0.35, 14.4);
+      camera.lookAt(0, 0.1, 0);
+      portal.visible = true;
+      portal.position.set(0,0,0); portal.rotation.set(0,0,0); portal.scale.setScalar(1);
+      ring.material.emissiveIntensity = 2.4;
+      ring2.material.opacity = 0.55;
+      core.material.opacity = 0.62; core.quaternion.copy(camera.quaternion);
+      well.material.opacity = 0.55;
+      portalLight.intensity = 6.0;
+      if(coinMesh) coinMesh.visible = false;
+      if(heroSys) heroSys.mesh.visible = false;
+      if(streamSys && streamItems.length){
+        streamSys.mesh.visible = true;
+        const Rx=mobile?4.6:7.2, Ry=mobile?2.0:2.7, Rz=mobile?3.0:4.2, t0=0.65;
+        for(let i=0;i<STREAM_CAP;i++){
+          const it=streamItems[i]; if(!it){ continue; }
+          const ang=it.base + t0;
+          const x=Math.cos(ang)*Rx;
+          const y=Math.sin(ang)*Ry;
+          const z=Math.sin(ang)*Rz - 1.5;
+          dummy.position.set(x,y,z);
+          dummy.quaternion.copy(camera.quaternion);
+          const depthScale = 0.9 + (z+Rz+1.5)/(2*Rz)*0.35;
+          dummy.scale.setScalar(depthScale);
+          dummy.updateMatrix(); streamSys.mesh.setMatrixAt(i,dummy.matrix);
+          streamSys.aOp.array[i]=1;
+        }
+        streamSys.mesh.instanceMatrix.needsUpdate=true; streamSys.aOp.needsUpdate=true;
+      }
+      if(composer){ composer.render(); } else { renderer.render(scene, camera); }
+    }
 
     function animate(){
       if(!running) return;
@@ -1053,7 +1100,7 @@ else{
       // adaptive perf: if avg frame time is high, drop dpr + disable DoF once
       if(!adapted){ acc+=dt; frames++; if(frames>70){ if(acc/frames>0.026){ dpr=Math.max(1,dpr-0.5); renderer.setPixelRatio(dpr); renderer.setSize(W,H); composer.setSize(W,H); if(bokeh) bokeh.enabled=false; } adapted=true; } }
     }
-    animate();
+    if(reduce){ renderStatic(); } else { animate(); }
   }catch(err){
     console.error('3D scene failed, using fallback:', err);
     showFallback();
