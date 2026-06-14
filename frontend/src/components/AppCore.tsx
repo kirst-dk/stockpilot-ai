@@ -13,6 +13,7 @@ import { adaptViemWallet } from "@reservoir0x/relay-sdk";
 import { SmartMoneyBadge } from "@/components/smart-money/SmartMoneyBadge";
 import { useStocky } from "@/components/concierge/StockyContext";
 import { setXStockCatalog } from "@/lib/intelligence/xstocks";
+import { useLiveQuotes } from "@/lib/marketPrices";
 
 const RelaySwapWidget = dynamic(
   () => import("@reservoir0x/relay-kit-ui").then((mod) => mod.SwapWidget),
@@ -552,135 +553,11 @@ export function MarketTab({
   aiStockInfo: Record<string, string>; aiStockLoading: Record<string, boolean>; getStockAiInfo: (s: string) => void;
   setActiveTab: (t: TabId) => void;
 }) {
-  const strategy = strategies[activeStrategy];
   const stocky = useStocky();
+  const { quotes: live } = useLiveQuotes(allXStocks.map((s) => s.symbol));
 
   return (
     <div className="space-y-6">
-      {/* Strategies section */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold">Strategies</h2>
-          <button
-            onClick={getStrategyAiInfo}
-            disabled={strategyAiLoading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-violet-600/20 to-blue-600/20 text-violet-400 border border-violet-500/20 text-xs font-medium hover:from-violet-600/30 hover:to-blue-600/30 disabled:opacity-50 transition-all"
-          >
-            {strategyAiLoading ? (
-              <span className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-            )}
-            AI Analysis
-          </button>
-        </div>
-
-        {/* Strategy cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-          {strategies.map((s, i) => (
-            <button
-              key={s.id}
-              onClick={() => setActiveStrategy(i)}
-              className={`p-4 rounded-xl text-left transition-all duration-200 border ${
-                activeStrategy === i
-                  ? "border-blue-500/40 bg-blue-500/[0.06]"
-                  : "border-white/5 bg-white/[0.02] hover:border-white/10 hover:bg-white/[0.04]"
-              }`}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-semibold">{s.name}</span>
-                <span className="text-emerald-400 text-xs font-mono">{s.returnPct}</span>
-              </div>
-              <p className="text-[10px] text-white/40 mb-3 line-clamp-2">{s.desc}</p>
-              <div className="flex items-center gap-3 text-[10px] text-white/50">
-                <span>Risk {s.risk}</span>
-                <span>Sharpe {s.sharpe}</span>
-                <span>{s.aum}</span>
-              </div>
-              {/* Mini allocation bar */}
-              <div className="flex gap-0.5 mt-3 h-1.5 rounded-full overflow-hidden">
-                {s.allocation.map((a, j) => (
-                  <div key={j} className="h-full rounded-full" style={{ width: `${a.value}%`, background: COLORS[j] }} />
-                ))}
-              </div>
-            </button>
-          ))}
-        </div>
-
-        {/* Strategy detail */}
-        <div className="grid lg:grid-cols-5 gap-4">
-          <div className="lg:col-span-3 p-5 rounded-xl border border-white/5 bg-white/[0.02]">
-            <h3 className="text-xs font-semibold text-white/50 tracking-wider uppercase mb-3">Allocation — {strategy.name}</h3>
-            <div className="flex flex-col sm:flex-row items-center gap-6">
-              <div className="w-[160px] h-[160px] flex-shrink-0">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={strategy.allocation} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={2} dataKey="value" animationDuration={500}>
-                      {strategy.allocation.map((_, i) => <Cell key={i} fill={COLORS[i]} />)}
-                    </Pie>
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="flex-1 space-y-2">
-                {strategy.allocation.map((item, i) => (
-                  <div key={item.name} className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded" style={{ background: COLORS[i] }} />
-                      <span className="text-xs font-medium text-white/80">{item.name}</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-xs">
-                      <span className="font-mono text-white/50">{item.value}%</span>
-                      <span className={`font-mono ${item.change >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                        {item.change >= 0 ? "+" : ""}{item.change}%
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-          <div className="lg:col-span-2 p-5 rounded-xl border border-white/5 bg-white/[0.02]">
-            <h3 className="text-xs font-semibold text-white/50 tracking-wider uppercase mb-3">AI Signals</h3>
-            <div className="space-y-3">
-              {strategy.signals.map(sig => (
-                <div key={sig.symbol} className="p-3 rounded-lg border border-white/5 bg-white/[0.02]">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-white/90">{sig.symbol}</span>
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
-                      sig.action.includes("STRONG") ? "bg-emerald-500/20 text-emerald-400" :
-                      sig.action.includes("BUY") ? "bg-emerald-500/15 text-emerald-400/80" :
-                      "bg-amber-500/15 text-amber-400"
-                    }`}>{sig.action}</span>
-                  </div>
-                  <div className="text-[10px] text-white/40 mb-1.5">{sig.reason}</div>
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 h-1 rounded-full bg-white/5 overflow-hidden">
-                      <div className="h-full rounded-full bg-gradient-to-r from-blue-500 to-emerald-500" style={{ width: `${sig.confidence}%` }} />
-                    </div>
-                    <span className="text-[9px] font-mono text-white/40">{sig.confidence}%</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Strategy AI info panel */}
-        {strategyAiInfo && (
-          <div className="mt-4 p-4 rounded-xl border border-violet-500/20 bg-violet-500/[0.03]">
-            <div className="flex items-center gap-2 mb-2">
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="#a78bfa" strokeWidth="1.5" strokeLinecap="round"/></svg>
-              <span className="text-xs font-semibold text-violet-400">AI Strategy Analysis</span>
-              <span className="text-[9px] text-white/30">Nansen + ELFA + AltLLM</span>
-            </div>
-            <p className="text-xs text-white/60 whitespace-pre-wrap leading-relaxed">{strategyAiInfo}</p>
-          </div>
-        )}
-      </div>
-
-      {/* Divider */}
-      <div className="border-t border-white/5" />
-
       {/* xStocks Assets section */}
       <div>
         <div className="flex items-center justify-between mb-4">
@@ -724,14 +601,12 @@ export function MarketTab({
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {filteredXStocks.map(stock => {
               const isBridgeable = BRIDGE_PRODUCTS.has(stock.symbol);
+              const q = live[stock.symbol];
+              const qUp = (q?.change ?? 0) >= 0;
               return (
                 <div key={stock.symbol} className="p-4 rounded-xl border border-white/5 bg-white/[0.015] hover:border-white/10 hover:bg-white/[0.03] transition-all duration-200">
                   <div className="flex items-center gap-2.5 mb-2">
-                    {stock.logo ? (
-                      <img src={stock.logo} alt={stock.symbol} className="w-8 h-8 rounded-lg bg-white/5 object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                    ) : (
-                      <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500/20 to-indigo-500/20 flex items-center justify-center text-[10px] font-bold text-blue-400">{stock.symbol.slice(0, 2)}</div>
-                    )}
+                    <TokenIcon token={{ symbol: stock.symbol, logo: stock.logo }} size={32} />
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-bold text-white/90 truncate">{stock.symbol}</div>
                       <div className="text-[10px] text-white/40 truncate">{stock.name}</div>
@@ -739,6 +614,14 @@ export function MarketTab({
                     {isBridgeable && (
                       <span className="text-[8px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full border border-emerald-500/20">BRIDGE</span>
                     )}
+                  </div>
+
+                  {/* Live price + 24h */}
+                  <div className="flex items-baseline justify-between mb-2">
+                    <span className="text-[15px] font-bold text-white/90 tabular-nums">{q ? `$${q.price.toFixed(2)}` : "—"}</span>
+                    <span className="text-[11px] font-semibold tabular-nums" style={{ color: q ? (qUp ? "#34e3b0" : "#ff6b81") : "rgba(255,255,255,0.3)" }}>
+                      {q ? `${qUp ? "+" : ""}${q.change.toFixed(2)}% · 24h` : "— · 24h"}
+                    </span>
                   </div>
 
                   {/* Smart Money badge */}

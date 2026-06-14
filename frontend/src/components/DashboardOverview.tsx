@@ -4,11 +4,11 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
   TrendingUp, TrendingDown, ArrowUpRight, Wallet, Layers, Globe2,
-  ArrowLeftRight, Sparkles, BarChart3,
+  Sparkles, BarChart3,
 } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { TokenIcon, useAppData } from "@/components/AppCore";
-import { REFERENCE_QUOTES, type StockQuote } from "@/lib/marketPrices";
+import { REFERENCE_QUOTES, useLiveQuotes, type StockQuote } from "@/lib/marketPrices";
 
 function seededSeries(base: number, change: number, n = 32) {
   // deterministic gentle walk ending near `base`, shaped by 24h `change`
@@ -42,7 +42,7 @@ function StatCard({ icon: Icon, label, value, sub, accent }: {
   );
 }
 
-function MoverCard({ q }: { q: StockQuote }) {
+function MoverCard({ q, logo }: { q: StockQuote; logo?: string }) {
   const up = q.change >= 0;
   return (
     <Link
@@ -50,7 +50,7 @@ function MoverCard({ q }: { q: StockQuote }) {
       className="sp-glass sp-card-hover shrink-0 w-[176px] p-4 block"
     >
       <div className="flex items-center gap-2">
-        <TokenIcon token={{ symbol: q.symbol }} size={28} />
+        <TokenIcon token={{ symbol: q.symbol, logo }} size={28} />
         <div className="min-w-0">
           <div className="text-[13px] font-semibold text-white leading-none">{q.symbol}</div>
           <div className="text-[10.5px] text-white/40 truncate mt-0.5">{q.name}</div>
@@ -67,24 +67,50 @@ function MoverCard({ q }: { q: StockQuote }) {
 export function DashboardOverview() {
   const d = useAppData();
   const quotes = REFERENCE_QUOTES;
-  const [featured, setFeatured] = useState<StockQuote>(quotes[1]); // NVDAx
+  const [featuredSym, setFeaturedSym] = useState<StockQuote>(quotes[1]); // NVDAx
 
   const available = d.allXStocks.length || 155;
+
+  const logoBySym = useMemo(() => new Map(d.allXStocks.map((s) => [s.symbol, s.logo])), [d.allXStocks]);
+
+  const tableBase = useMemo(() => {
+    const list = d.allXStocks.length
+      ? d.allXStocks
+      : quotes.map((q) => ({ symbol: q.symbol, name: q.name, logo: undefined, mantleAddress: "", networks: [] as string[] }));
+    return list.slice(0, 8);
+  }, [d.allXStocks, quotes]);
+
+  // Live quotes for everything shown: top movers + featured selector + table.
+  const quoteSymbols = useMemo(
+    () => [...quotes.map((q) => q.symbol), ...tableBase.map((s) => s.symbol)],
+    [quotes, tableBase],
+  );
+  const { quotes: live } = useLiveQuotes(quoteSymbols);
+
+  // Merge live data onto the featured selection for the chart/header.
+  const featured: StockQuote = { ...featuredSym, ...(live[featuredSym.symbol] ?? {}) };
+  const setFeatured = setFeaturedSym;
   const series = useMemo(() => seededSeries(featured.price, featured.change), [featured]);
   const featUp = featured.change >= 0;
 
-  const marketRows = useMemo(() => {
-    const bySym = new Map(quotes.map((q) => [q.symbol, q]));
-    const list = (d.allXStocks.length ? d.allXStocks : quotes.map((q) => ({ symbol: q.symbol, name: q.name, logo: undefined, mantleAddress: "", networks: [] as string[] })));
-    return list.slice(0, 8).map((s) => ({ ...s, quote: bySym.get(s.symbol) }));
-  }, [d.allXStocks, quotes]);
+  const marketRows = useMemo(
+    () => tableBase.map((s) => ({ ...s, quote: live[s.symbol] })),
+    [tableBase, live],
+  );
+
+  // Real market 24h = average of the live changes we have.
+  const market24h = useMemo(() => {
+    const vals = Object.values(live).map((q) => q.change);
+    if (!vals.length) return null;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  }, [live]);
 
   return (
     <div className="space-y-6">
       {/* Stat row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <StatCard icon={Wallet} label="Portfolio Value" value={d.selectedCount ? `${d.totalAllocation}%` : "$0.00"} sub={d.selectedCount ? `${d.selectedCount} assets allocated` : "Build your portfolio"} accent="#2fe6b0" />
-        <StatCard icon={TrendingUp} label="Market 24h" value="+1.42%" sub="xStocks index" accent="#7c6bff" />
+        <StatCard icon={TrendingUp} label="Market 24h" value={market24h === null ? "—" : `${market24h >= 0 ? "+" : ""}${market24h.toFixed(2)}%`} sub="xStocks avg" accent="#7c6bff" />
         <StatCard icon={Layers} label="xStocks Available" value={`${available}`} sub="Tokenized equities" accent="#34e3b0" />
         <StatCard icon={Globe2} label="Networks" value="9+" sub="Bridgeable via CCIP" accent="#9d90ff" />
       </div>
@@ -96,16 +122,16 @@ export function DashboardOverview() {
           <Link href="/market" className="text-[12px] text-white/45 hover:text-white inline-flex items-center gap-1">View market <ArrowUpRight size={13} /></Link>
         </div>
         <div className="flex gap-3 overflow-x-auto sp-noscroll pb-1">
-          {quotes.slice(0, 10).map((q) => <MoverCard key={q.symbol} q={q} />)}
+          {quotes.slice(0, 10).map((q) => <MoverCard key={q.symbol} q={{ ...q, ...(live[q.symbol] ?? {}) }} logo={logoBySym.get(q.symbol)} />)}
         </div>
       </section>
 
       {/* Chart + exchange panel */}
-      <div className="grid lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 min-w-0 sp-glass p-5">
+      <div className="grid grid-cols-1 gap-4">
+        <div className="min-w-0 sp-glass p-5">
           <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
             <div className="flex items-center gap-3">
-              <TokenIcon token={{ symbol: featured.symbol }} size={36} />
+              <TokenIcon token={{ symbol: featured.symbol, logo: logoBySym.get(featured.symbol) }} size={36} />
               <div>
                 <div className="font-display font-semibold text-white text-[16px] leading-none">{featured.symbol} <span className="text-white/40 text-[12px] font-normal">/ USDC</span></div>
                 <div className="text-[11.5px] text-white/40 mt-1">{featured.name} · tokenized equity</div>
@@ -155,34 +181,6 @@ export function DashboardOverview() {
               </button>
             ))}
           </div>
-        </div>
-
-        {/* Quick trade panel */}
-        <div className="min-w-0 sp-glass-strong p-5 flex flex-col">
-          <h3 className="font-display font-semibold text-white text-[15px] flex items-center gap-2"><ArrowLeftRight size={15} className="text-violet-300" /> Quick Trade</h3>
-          <p className="text-[12px] text-white/45 mt-1 leading-relaxed">Swap USDC into any xStock natively on Fluxion AMM — no off-ramp, fully on-chain.</p>
-
-          <div className="mt-4 space-y-2">
-            <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
-              <div className="text-[10.5px] text-white/40">You pay</div>
-              <div className="flex items-center justify-between mt-1">
-                <span className="font-display text-[18px] text-white">100.00</span>
-                <span className="text-[12.5px] font-semibold text-white/80 px-2.5 py-1 rounded-lg bg-white/5">USDC</span>
-              </div>
-            </div>
-            <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
-              <div className="text-[10.5px] text-white/40">You receive ≈</div>
-              <div className="flex items-center justify-between mt-1">
-                <span className="font-display text-[18px] text-white tabular-nums">{(100 / featured.price).toFixed(4)}</span>
-                <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-white/80 px-2.5 py-1 rounded-lg bg-white/5">
-                  <TokenIcon token={{ symbol: featured.symbol }} size={16} /> {featured.symbol}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <Link href="/swap" className="sp-btn-primary text-center text-[13.5px] py-2.5 mt-4">Open Swap</Link>
-          <Link href="/bridge" className="text-center text-[12.5px] py-2.5 mt-2 rounded-xl border border-white/[0.08] text-white/70 hover:text-white hover:border-white/20 transition-colors">Bridge assets →</Link>
         </div>
       </div>
 

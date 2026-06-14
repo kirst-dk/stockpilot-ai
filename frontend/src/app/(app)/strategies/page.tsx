@@ -1,7 +1,7 @@
 "use client";
 
-import { RwaStrategyTab } from "@/components/AppCore";
+import { AutopilotTabContent } from "@/components/AppCore";
 
 export default function StrategiesPage() {
-  return <RwaStrategyTab />;
+  return <AutopilotTabContent />;
 }
