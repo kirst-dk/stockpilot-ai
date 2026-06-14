@@ -27,7 +27,7 @@ export function StockyFloatingButton() {
       {!showOverlay && (
         <button
           onClick={() => open("floating")}
-          className="fixed bottom-6 right-6 z-40 group"
+          className="fixed bottom-24 lg:bottom-6 right-4 lg:right-6 z-40 group"
           aria-label={`Open ${t.title}`}
         >
           <div className="relative flex items-center gap-2.5 pl-2.5 pr-4 py-2.5 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 shadow-[0_8px_32px_rgba(16,185,129,0.35)] hover:shadow-[0_12px_36px_rgba(16,185,129,0.55)] transition-all border border-emerald-300/30">
