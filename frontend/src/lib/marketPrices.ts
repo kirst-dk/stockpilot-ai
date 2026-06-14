@@ -43,9 +43,15 @@ export const REFERENCE_QUOTES: StockQuote[] = [
 // Same-origin proxy to Yahoo Finance (configured in nginx as `/api/yf/`).
 const QUOTE_PROXY = "/api/yf/v7/finance/spark";
 
+// Yahoo uses dashes for share classes (BRK.B -> BRK-B).
+const TICKER_OVERRIDES: Record<string, string> = {
+  "BRK.B": "BRK-B",
+};
+
 /** Underlying equity ticker for an xStock symbol (AAPLx -> AAPL, SPYx -> SPY). */
 export function underlyingTicker(xsym: string): string {
-  return xsym.replace(/x$/i, "").toUpperCase();
+  const base = xsym.replace(/x$/i, "").toUpperCase();
+  return TICKER_OVERRIDES[base] ?? base;
 }
 
 // Module-level cache so we hit the feed once per session per symbol set.
