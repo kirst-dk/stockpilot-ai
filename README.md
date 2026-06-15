@@ -4,7 +4,9 @@
 
 > Built for [Mantle Turing Test Hackathon 2026](https://dorahacks.io/hackathon/mantleturingtesthackathon2026) — AI × RWA Track
 
-**[Live App](https://app.stockpilotai.xyz)** | **[Landing](https://stockpilotai.xyz)** | **[DoraHacks BUIDL](https://dorahacks.io/buidl/43884)** | **[Contract on Mantle](https://mantlescan.xyz/address/0xbbE80ACe5c46b49930ff0229762a1A57BE4CA6F4)**
+**[Live App](https://app.stockpilotai.xyz)** | **[Landing](https://stockpilotai.xyz)** | **[Demo Video](https://youtu.be/XTwdpAhcoTo)** | **[DoraHacks BUIDL](https://dorahacks.io/buidl/43884)** | **[X / @0xkirst](https://x.com/0xkirst)** | **[Contract on Mantle](https://mantlescan.xyz/address/0xbbE80ACe5c46b49930ff0229762a1A57BE4CA6F4)**
+
+> **Demo video:** https://youtu.be/XTwdpAhcoTo
 
 ## Overview
 
@@ -12,49 +14,53 @@ StockPilot AI is an autonomous AI agent that manages portfolios of tokenized equ
 
 ### Key Features
 
+- **Redesigned multi-route app** — rebuilt as a Next.js App Router experience with a left sidebar, 7 deep-linkable routes, and a consistent design system
+- **Real-time xStock price ticker** — live tokenized-equity prices (SPYx, NVDAx, AAPLx, TSLAx…) with 24h change across the top, not crypto pairs
 - **155+ xStocks Assets** — Full integration with all xStocks tokenized equities on Mantle (dynamic loading, searchable)
+- **Fluxion DEX Integration** — On-page swap with real-time quotes, ERC-4626 auto-wrapping, native MNT support, wallet balances
+- **Cross-Chain Bridge** — Relay.link SwapWidget integrated on-page across 65+ EVM networks (no external redirects)
 - **AI-Driven Portfolio Management** — Three strategies (Balanced Growth, Momentum, Value Investing) with LLM-enhanced analysis
-- **Fluxion DEX Integration** — On-page swap with 161 tokens, real-time quotes, wallet balance display, native MNT support
-- **Liquidity Pools** — Provide liquidity on Fluxion V3 pools with dual-token deposits via NonfungiblePositionManager
-- **Cross-Chain Bridge** — Relay.link SwapWidget integrated directly on-page (no external redirects)
-- **On-Chain Transparency** — All agent actions (buy/sell/rebalance) recorded on Mantle smart contracts
+- **Stocky AI assistant** — floating concierge (Nansen + ELFA + AltLLM, tool-calling chat) available on every route
+- **On-Chain Transparency** — Agent actions (buy/sell/rebalance) recorded on Mantle smart contracts; ERC-8004 agent identity NFT
 - **AI Analysis** — Nansen (on-chain analytics) + ELFA AI (market intelligence) + AltLLM (portfolio analysis)
-- **ERC-8004 Agent Identity** — Agent has an on-chain identity NFT per hackathon requirements
+- **Fully mobile responsive** — hamburger menu + bottom navigation bar, no horizontal scroll (tested at 400px)
+- **Premium 3D landing** — real-time Three.js / WebGL hero with an infinite xStock token stream and a rich `prefers-reduced-motion` fallback
 
 ### How It Works
 
 ```
 User connects wallet (RainbowKit)
            ↓
-Browses 155+ xStocks on Market tab with AI analysis
+Browses 155+ xStocks on the Market route with AI analysis
            ↓
 Selects strategy (Balanced / Momentum / Value) or builds custom portfolio
            ↓
 AI Agent analyzes portfolio (risk, diversification, recommendations)
            ↓
-User buys via Swap tab (Fluxion DEX) or bridges assets (Relay.link)
+User buys via Swap (Fluxion DEX) or bridges assets (Relay.link)
            ↓
-Dashboard shows positions, pools, and strategy performance
+Dashboard shows positions and strategy performance
 ```
 
-## App Architecture — 8 Tabs
+## App Architecture — Multi-Route (7 sidebar routes)
 
-| Tab | Description |
-|-----|-------------|
-| **Market** | AI strategies + 155 xStocks with AI info (company/risks) + BUY buttons |
-| **Swap** | Fluxion DEX — 161 tokens, searchable selector, real quotes, wallet balances, native MNT |
-| **Pools** | Fluxion V3 liquidity pools — 12 pools, dual-token deposit, search/filter |
-| **Bridge** | Relay.link SwapWidget — cross-chain bridge to Mantle (on-page, no redirect) |
-| **RWA Strategy** | AI Yield Optimizer — dynamic USDY (treasuries) ↔ xStocks allocation from on-chain yield + sentiment |
-| **Dashboard** | Portfolio overview, positions, liquidity, strategy allocation |
-| **Stocky Agent** | **Autopilot** — autonomous 3-layer RWA agent (xStocks/USDY/mETH). Classifies the market regime, rebalances dynamically, and records every decision on-chain. Manual/Autopilot toggle + live activity feed. |
-| **Education** | How it works, partners, contracts, xStocks/Fluxion explainer |
+The app was rebuilt as a Next.js App Router project with a left sidebar. Every route is deep-linkable (`trailingSlash`) and directly shareable/reloadable.
 
-A floating **Stocky** concierge (Nansen + ELFA + AltLLM, tool-calling chat) remains available on every tab.
+| Route | Description |
+|-------|-------------|
+| **Dashboard** (`/`) | Portfolio overview, positions, strategy allocation |
+| **Market** (`/market`) | 155 xStocks with AI info (company/risks) + BUY buttons |
+| **Swap** (`/swap`) | Fluxion DEX — searchable selector, real quotes, wallet balances, native MNT, ERC-4626 wrapping |
+| **Bridge** (`/bridge`) | Relay.link SwapWidget — cross-chain bridge to Mantle across 65+ networks (on-page, no redirect) |
+| **Portfolio** (`/portfolio`) | Builder — allocation sliders, "Use AI Strategy", real-time pie-chart |
+| **Strategies** (`/strategies`) | AI strategies (Balanced Growth, Momentum, Value Investing) |
+| **Education** (`/education`) | How it works, partners, contracts, xStocks/Fluxion explainer |
+
+A **real-time xStock price ticker** runs across the top, and a floating **Stocky** concierge (Nansen + ELFA + AltLLM, tool-calling chat) is available on every route. The UI is fully mobile responsive (hamburger menu + bottom nav).
 
 ## Autopilot — Autonomous RWA Yield Agent
 
-The **Stocky Agent** tab turns StockPilot from a manual assistant into an autonomous agent that allocates capital across three layers and **records every decision on-chain** (the core hackathon criterion — a verifiable "Turing test" track record on Mantlescan).
+StockPilot also ships an autonomous **Autopilot** agent engine (smart contract + FastAPI backend) that allocates capital across three layers and **records every decision on-chain** (the core hackathon criterion — a verifiable "Turing test" track record on Mantlescan).
 
 **Three layers**
 
@@ -135,6 +141,7 @@ The **risk profile** (conservative / balanced / aggressive) shifts the threshold
 | Bridge | Relay.link (`@reservoir0x/relay-kit-ui` SwapWidget) |
 | AI | Nansen API + ELFA AI + AltLLM |
 | xStocks | 155 tokenized equities (static JSON + API fallback) |
+| Landing | Three.js / WebGL (instanced 3D hero, `prefers-reduced-motion` fallback) |
 | Network | Mantle (Chain ID: 5000) |
 
 ## Project Structure
@@ -152,12 +159,13 @@ stockpilot-ai/
 │   └── main.py             # FastAPI application
 ├── frontend/               # Next.js dashboard
 │   ├── src/app/
-│   │   ├── page.tsx        # Main app (8 tabs: market, swap, pools, bridge, rwa, dashboard, stocky agent, education)
+│   │   ├── (app)/          # App routes: dashboard (/), market, swap, bridge, portfolio, strategies, education
 │   │   ├── providers.tsx   # RainbowKit + Wagmi + Relay providers
 │   │   └── layout.tsx      # HTML layout
+│   ├── src/components/     # Sidebar, Topbar, xStock Ticker, Stocky concierge, dashboard widgets
 │   └── public/
 │       └── xstocks-data.json # 155 xStocks static data
-└── landing/                # Landing page (stockpilotai.xyz)
+└── landing/                # Landing page (stockpilotai.xyz) — Three.js / WebGL 3D hero
 ```
 
 ## Smart Contracts
