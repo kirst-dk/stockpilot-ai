@@ -252,25 +252,73 @@
       position: relative; aspect-ratio: 1/1; border-radius: 24px; overflow: hidden;
       background: radial-gradient(circle at 50% 50%, #1A2E5A, #0C1A32 70%);
       border: 1px solid rgba(245,240,224,0.08);
+      container-type: size;
       opacity: 0; transform: scale(0.94); transition: opacity 800ms ease, transform 800ms ease;
     }
     .how-visual.revealed { opacity: 1; transform: scale(1); }
-    .orbit { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); border: 1px solid rgba(139,170,212,0.18); border-radius: 50%; }
-    .orbit.o1 { width: 50%; height: 50%; } .orbit.o2 { width: 74%; height: 74%; } .orbit.o3 { width: 96%; height: 96%; }
+    .orbit { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); border: 1px solid rgba(139,170,212,0.14); border-radius: 50%; }
+    .orbit.o1 { width: 36%; height: 36%; } .orbit.o2 { width: 56%; height: 56%; } .orbit.o3 { width: 76%; height: 76%; }
+
+    /* allocation gauge — the agent's target split, drawn on rebalance */
+    .alloc-ring {
+      position: absolute; top: 50%; left: 50%; width: 94cqw; height: 94cqw;
+      transform: translate(-50%,-50%) rotate(-90deg) scale(0.82); border-radius: 50%;
+      background: conic-gradient(var(--accent-orange) 0 60%, var(--accent-gold) 60% 85%, var(--accent-lime) 85% 100%);
+      -webkit-mask: radial-gradient(closest-side, transparent 87%, #000 88%);
+              mask: radial-gradient(closest-side, transparent 87%, #000 88%);
+      opacity: 0; z-index: 1;
+      transition: opacity 900ms ease, transform 900ms cubic-bezier(0.2,0.8,0.2,1);
+    }
+    .how-visual.rebalanced .alloc-ring { opacity: 0.85; transform: translate(-50%,-50%) rotate(0deg) scale(1); }
+
     .orbit-core {
-      position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
-      width: 30%; height: 30%; border-radius: 50%;
-      background: radial-gradient(circle at 35% 30%, var(--accent-gold), var(--accent-orange));
-      box-shadow: 0 0 60px rgba(255,107,53,0.5); display: flex; align-items: center; justify-content: center;
+      position: absolute; top: 50%; left: 50%; z-index: 3;
+      width: 26%; height: 26%; border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, #FFE7A0, var(--accent-gold) 38%, var(--accent-orange) 78%);
+      display: flex; align-items: center; justify-content: center;
       font-family: 'Abril Fatface', serif; color: #0C1A32; font-size: 1.4rem;
+      animation: corePulse 4.5s ease-in-out infinite;
     }
+    @keyframes corePulse {
+      0%, 100% { box-shadow: 0 0 40px rgba(255,107,53,0.45), 0 0 0 0 rgba(255,107,53,0.30); transform: translate(-50%,-50%) scale(1); }
+      50%      { box-shadow: 0 0 80px rgba(255,107,53,0.75), 0 0 0 16px rgba(255,107,53,0.0); transform: translate(-50%,-50%) scale(1.06); }
+    }
+
     .orbit-chip {
-      position: absolute; width: 46px; height: 46px; border-radius: 12px; background: var(--surface);
-      display: flex; align-items: center; justify-content: center; padding: 7px;
-      box-shadow: 0 6px 20px rgba(0,0,0,0.5); animation: spin var(--sp, 24s) linear infinite;
+      position: absolute; top: 50%; left: 50%; margin: -23px 0 0 -23px;
+      width: 46px; height: 46px; border-radius: 12px; background: var(--surface);
+      display: flex; align-items: center; justify-content: center; padding: 7px; z-index: 4;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.5), 0 0 0 1px rgba(245,240,224,0.06);
+      animation: spin var(--sp, 24s) linear infinite;
+      transition: box-shadow 400ms ease;
     }
-    .orbit-chip img { width: 100%; height: 100%; object-fit: contain; }
-    @keyframes spin { from { transform: rotate(0) translateX(var(--rad)) rotate(0); } to { transform: rotate(360deg) translateX(var(--rad)) rotate(-360deg); } }
+    .orbit-chip.rev { animation-direction: reverse; }
+    .orbit-chip.g-growth { --gc: 255,107,53; }
+    .orbit-chip.g-yield { --gc: 245,200,66; }
+    .orbit-chip.g-protection { --gc: 168,230,58; }
+    .how-visual.rebalanced .orbit-chip {
+      box-shadow: 0 6px 20px rgba(0,0,0,0.5), 0 0 0 2px rgba(var(--gc),0.85), 0 0 18px rgba(var(--gc),0.5);
+    }
+    .orbit-chip img { width: 100%; height: 100%; object-fit: contain; transition: transform 200ms ease; }
+    .orbit-chip:hover { animation-play-state: paused; z-index: 12; }
+    .orbit-chip:hover img { transform: scale(1.2); }
+    .orbit-chip::after {
+      content: attr(data-tk); position: absolute; bottom: 116%; left: 50%; transform: translateX(-50%);
+      font-family: 'B612 Mono', monospace; font-size: 0.6rem; letter-spacing: 0.06em; color: var(--text-primary);
+      background: rgba(12,26,50,0.92); padding: 2px 7px; border-radius: 6px; white-space: nowrap;
+      opacity: 0; transition: opacity 200ms ease; pointer-events: none;
+    }
+    .orbit-chip:hover::after { opacity: 1; }
+    @keyframes spin {
+      from { transform: rotate(var(--start, 0deg)) translateX(var(--rad)) rotate(calc(-1 * var(--start, 0deg))); }
+      to   { transform: rotate(calc(var(--start, 0deg) + 360deg)) translateX(var(--rad)) rotate(calc(-1 * var(--start, 0deg) - 360deg)); }
+    }
+    .alloc-legend { display: flex; gap: 1.3rem; flex-wrap: wrap; margin-top: 1.5rem; }
+    .alloc-legend .leg {
+      display: flex; align-items: center; gap: 0.5rem; font-family: 'B612 Mono', monospace;
+      font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted);
+    }
+    .alloc-legend .dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
     .how-text-line { opacity: 0; transform: translateY(16px); transition: opacity 600ms ease, transform 600ms ease; }
     .how-text-line.revealed { opacity: 1; transform: translateY(0); }
     .how-steps { list-style: none; margin-top: 1.6rem; display: flex; flex-direction: column; gap: 1.1rem; }
@@ -360,7 +408,12 @@
     @media (prefers-reduced-motion: reduce) {
       html { scroll-behavior: auto; }
       .star { animation: none !important; opacity: var(--max-op, 0.6) !important; }
-      .orbit-chip { animation: none !important; }
+      .orbit-core { animation: none !important; transform: translate(-50%,-50%) !important; }
+      .orbit-chip {
+        animation: none !important;
+        transform: rotate(var(--start, 0deg)) translateX(var(--rad)) rotate(calc(-1 * var(--start, 0deg))) !important;
+      }
+      .alloc-ring { opacity: 0.85 !important; transform: translate(-50%,-50%) rotate(0deg) scale(1) !important; }
       .hero-rows { opacity: 1 !important; }
       .hero-row-track { animation: none !important; }
       .hero-tile, .hero-overlay, .hero-stats, .word-reveal, .how-visual,
@@ -462,12 +515,18 @@
     <div class="how-inner">
       <div class="how-visual" id="howVisual" aria-hidden="true">
         <div class="orbit o1"></div><div class="orbit o2"></div><div class="orbit o3"></div>
+        <div class="alloc-ring"></div>
         <div class="orbit-core">AI</div>
       </div>
       <div>
         <div class="section-kicker how-text-line">The Engine</div>
         <h2 class="section-heading how-text-line" style="transition-delay:80ms">Research. Allocate. Record on-chain.</h2>
         <p class="section-sub how-text-line" style="transition-delay:160ms">StockPilot turns market signals into a transparent, auditable portfolio. The agent doesn't just trade — it leaves a permanent track record on Mantle.</p>
+        <div class="alloc-legend how-text-line" style="transition-delay:200ms" aria-label="Target allocation split">
+          <span class="leg"><span class="dot" style="background:var(--accent-orange)"></span>Growth 60%</span>
+          <span class="leg"><span class="dot" style="background:var(--accent-gold)"></span>Yield 25%</span>
+          <span class="leg"><span class="dot" style="background:var(--accent-lime)"></span>Protection 15%</span>
+        </div>
         <ul class="how-steps">
           <li class="how-text-line" style="transition-delay:220ms"><span class="how-step-n">01</span><span><strong>Gather signals.</strong> Nansen smart-money flows, ELFA sentiment and realized volatility.</span></li>
           <li class="how-text-line" style="transition-delay:300ms"><span class="how-step-n">02</span><span><strong>Allocate.</strong> AI classifies the regime and targets a growth / protection / yield split.</span></li>
@@ -703,20 +762,32 @@
     (function setupHow() {
       var visual = document.getElementById('howVisual');
       var lines = document.querySelectorAll('.how-text-line');
-      // place orbiting logo chips
+      // orbiting xStock "planets" grouped by allocation bucket [ticker, radius(cqw), speed(s), startDeg, group, reverse]
       if (visual) {
-        var chips = [['AAPLx', 30, 18], ['NVDAx', 37, 9], ['TSLAx', 46, 22]];
-        chips.forEach(function (c) {
+        var PLANETS = [
+          ['METAx', 18, 24, 20,  'growth', false],
+          ['Vx',    18, 28, 200, 'yield', true],
+          ['NVDAx', 28, 38, 70,  'growth', false],
+          ['SPYx',  28, 44, 165, 'yield', true],
+          ['KOx',   28, 50, 285, 'protection', false],
+          ['TSLAx', 38, 58, 30,  'growth', true],
+          ['QQQx',  38, 64, 120, 'yield', false],
+          ['JNJx',  38, 70, 205, 'protection', true],
+          ['AMZNx', 38, 76, 320, 'growth', false]
+        ];
+        PLANETS.forEach(function (p) {
           var el = document.createElement('div');
-          el.className = 'orbit-chip';
-          el.style.setProperty('--rad', c[1] + '%');
-          el.style.setProperty('--sp', c[2] + 's');
-          var im = document.createElement('img'); im.src = 'logos/' + c[0] + '.png'; im.alt = c[0];
+          el.className = 'orbit-chip g-' + p[4] + (p[5] ? ' rev' : '');
+          el.setAttribute('data-tk', p[0]);
+          el.style.setProperty('--rad', p[1] + 'cqw');
+          el.style.setProperty('--sp', p[2] + 's');
+          el.style.setProperty('--start', p[3] + 'deg');
+          var im = document.createElement('img'); im.src = 'logos/' + p[0] + '.png'; im.alt = p[0]; im.loading = 'lazy';
           el.appendChild(im); visual.appendChild(el);
         });
       }
       var reveal = function () {
-        if (visual) visual.classList.add('revealed');
+        if (visual) { visual.classList.add('revealed'); setTimeout(function () { visual.classList.add('rebalanced'); }, REDUCE ? 0 : 500); }
         lines.forEach(function (el) { el.classList.add('revealed'); });
       };
       if (REDUCE) { reveal(); return; }
