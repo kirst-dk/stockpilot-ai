@@ -79,21 +79,29 @@
       position: relative; width: 100%; height: 100vh; min-height: 640px;
       overflow: hidden; background: var(--bg-primary);
     }
-    .hero-grid {
-      position: absolute; inset: 0; display: grid;
-      grid-template-columns: repeat(6, 1fr); grid-template-rows: repeat(4, 1fr);
-      gap: 10px; padding: 10px; z-index: 1;
+    .hero-rows {
+      position: absolute; inset: 0; z-index: 1;
+      display: flex; flex-direction: column; gap: 10px; padding: 10px;
+      opacity: 0; transition: opacity 900ms ease;
     }
+    .hero-rows.visible { opacity: 1; }
+    .hero-row { flex: 1 1 0; min-height: 0; overflow: hidden; display: flex; align-items: stretch; }
+    .hero-row-track {
+      display: flex; gap: 10px; flex: 0 0 auto; height: 100%;
+      will-change: transform;
+    }
+    .hero-row.left .hero-row-track { animation: marqueeL var(--dur, 60s) linear infinite; }
+    .hero-row.right .hero-row-track { animation: marqueeR var(--dur, 60s) linear infinite; }
+    @keyframes marqueeL { from { transform: translate3d(0,0,0); } to { transform: translate3d(-50%,0,0); } }
+    @keyframes marqueeR { from { transform: translate3d(-50%,0,0); } to { transform: translate3d(0,0,0); } }
     .hero-tile {
       position: relative; overflow: hidden; border-radius: 14px;
-      background: var(--surface);
+      background: var(--surface); height: 100%; aspect-ratio: 1 / 1; flex: 0 0 auto;
       display: flex; align-items: center; justify-content: center;
-      will-change: transform, opacity;
-      transition: transform 1100ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 700ms ease;
+      will-change: transform; cursor: pointer;
+      transition: transform 260ms cubic-bezier(0.2,0.8,0.2,1), box-shadow 260ms ease, filter 260ms ease;
       box-shadow: inset 0 0 0 1px rgba(245,240,224,0.06);
     }
-    .hero-tile.scattered { transform: translate(var(--dx, 0px), var(--dy, 0px)) rotate(var(--r, 0deg)) scale(0.6); opacity: 0; }
-    .hero-tile.settled { transform: translate(0,0) rotate(0deg) scale(1); opacity: 1; }
     .hero-tile img {
       width: 56%; height: 56%; object-fit: contain;
       filter: drop-shadow(0 4px 14px rgba(0,0,0,0.5));
@@ -105,7 +113,11 @@
       color: var(--text-muted); opacity: 0; transition: opacity 200ms ease;
     }
     .hero-tile:hover::after { opacity: 1; }
-    .hero-tile:hover { transform: translateY(-4px) scale(1.04); box-shadow: 0 10px 30px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(245,200,66,0.4); }
+    .hero-tile:hover {
+      transform: scale(1.12); z-index: 6;
+      filter: brightness(1.18);
+      box-shadow: 0 14px 40px rgba(0,0,0,0.55), inset 0 0 0 2px rgba(245,200,66,0.7);
+    }
 
     .hero-vignette {
       position: absolute; inset: 0; z-index: 2; pointer-events: none;
@@ -114,28 +126,28 @@
         linear-gradient(to bottom, rgba(12,26,50,0.7) 0%, transparent 30%, transparent 55%, rgba(12,26,50,0.95) 100%);
     }
     .hero-overlay {
-      position: absolute; inset: 0; z-index: 3;
+      position: absolute; inset: 0; z-index: 3; pointer-events: none;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       text-align: center; padding: 2rem;
       opacity: 0; transition: opacity 700ms ease 0.9s;
     }
     .hero-overlay.visible { opacity: 1; }
     .hero-overlay-inner {
-      position: relative; background: rgba(12,26,50,0.45);
+      position: relative; pointer-events: auto; background: rgba(12,26,50,0.45);
       backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
       padding: 2.6rem 3.4rem; border-radius: 20px; border: 1px solid rgba(245,240,224,0.08);
-      max-width: 760px;
+      max-width: 820px;
     }
     .hero-kicker {
       font-family: 'B612 Mono', monospace; font-size: 0.78rem; letter-spacing: 0.22em;
       text-transform: uppercase; color: var(--accent-lime); margin-bottom: 1.1rem;
     }
     .hero-title {
-      font-family: 'Abril Fatface', serif; font-size: clamp(3rem, 10vw, 8.5rem);
-      line-height: 0.86; letter-spacing: -0.02em; color: var(--text-primary);
+      font-family: 'Abril Fatface', serif; font-size: clamp(3.2rem, 12vw, 9rem);
+      line-height: 0.82; letter-spacing: -0.02em; color: var(--text-primary);
       margin-bottom: 1.2rem; text-shadow: 0 2px 40px rgba(0,0,0,0.6);
     }
-    .hero-title span { color: var(--accent-orange); }
+    .hero-title span { display: block; color: var(--accent-orange); }
     .hero-tagline {
       font-weight: 400; font-size: clamp(0.95rem, 2vw, 1.2rem);
       color: var(--text-primary); max-width: 50ch; margin: 0 auto 2.2rem; opacity: 0.92;
@@ -316,13 +328,17 @@
       .nav { padding: 1rem 1.4rem; }
       .nav-links { display: none; }
       .hero { height: auto; min-height: 100vh; }
-      .hero-grid { grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(6, 1fr); }
-      .hero-overlay { position: relative; inset: auto; height: auto; min-height: 84vh; padding: 6rem 1.2rem 1.5rem; }
-      .hero-overlay-inner { padding: 2rem 1.4rem; max-width: 100%; }
+      .hero-rows { gap: 8px; padding: 8px; height: 100vh; bottom: auto; }
+      .hero-vignette { height: 100vh; bottom: auto; }
+      .hero-overlay {
+        position: relative; inset: auto; min-height: 100vh;
+        padding: 5rem 1.2rem 2rem;
+      }
+      .hero-overlay-inner { padding: 1.8rem 1.3rem; max-width: 100%; }
       .hero-stats {
         position: relative; left: auto; bottom: auto; transform: none;
-        margin: 0 auto; padding: 0 1.2rem 3rem; width: fit-content;
-        display: grid; grid-template-columns: repeat(2, auto); gap: 1.4rem 2.4rem;
+        margin: 0 auto; padding: 1.6rem 1.2rem 3rem; width: fit-content;
+        display: grid; grid-template-columns: repeat(2, auto); gap: 1.4rem 2.6rem; justify-content: center;
       }
       .hero-stat-num { font-size: 1.6rem; }
       .catalog-section, .how-section, .events-outer, .newsletter-section { padding-left: 1.4rem; padding-right: 1.4rem; }
@@ -334,7 +350,7 @@
       .footer-grid { grid-template-columns: 1fr 1fr; }
     }
     @media (max-width: 520px) {
-      .hero-grid { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(6, 1fr); }
+      .hero-rows { gap: 6px; padding: 6px; }
       .stock-tile { padding: 1rem; }
       .stock-name { min-height: 3.6em; font-size: 0.82rem; }
       .footer-grid { grid-template-columns: 1fr; }
@@ -345,6 +361,8 @@
       html { scroll-behavior: auto; }
       .star { animation: none !important; opacity: var(--max-op, 0.6) !important; }
       .orbit-chip { animation: none !important; }
+      .hero-rows { opacity: 1 !important; }
+      .hero-row-track { animation: none !important; }
       .hero-tile, .hero-overlay, .hero-stats, .word-reveal, .how-visual,
       .how-text-line, .event-card, .footer-reveal {
         transition: none !important;
@@ -379,7 +397,7 @@
 
   <!-- ===== HERO ===== -->
   <section class="hero" id="hero" aria-label="Hero">
-    <div class="hero-grid" id="heroGrid" aria-hidden="true"></div>
+    <div class="hero-rows" id="heroRows" aria-hidden="true"></div>
     <div class="hero-vignette" aria-hidden="true"></div>
 
     <div class="hero-overlay" id="heroOverlay">
@@ -554,38 +572,54 @@
       container.appendChild(frag);
     })();
 
-    // ===== HERO TILE GRID (scatter -> settle) =====
+    // ===== HERO BACKGROUND (per-row horizontal marquee, alternating directions) =====
     var HERO_TICKERS = ['AAPLx','NVDAx','TSLAx','AMZNx','GOOGLx','METAx','MSFTx','SPYx','QQQx','AMDx','AVGOx','NFLXx','COINx','HOODx','MSTRx','PLTRx','JPMx','Vx','ORCLx','CRMx','MCDx','KOx','JNJx','ABBVx'];
-    (function buildHeroGrid() {
-      var grid = document.getElementById('heroGrid');
-      var frag = document.createDocumentFragment();
-      var tiles = [];
-      for (var i = 0; i < HERO_TICKERS.length; i++) {
-        var tk = HERO_TICKERS[i];
+    (function buildHeroRows() {
+      var host = document.getElementById('heroRows');
+      var ROWS = 4;            // alternating left / right
+      var PER_ROW = 14;        // unique tiles per row (track holds 2 copies for seamless loop)
+      var DURS = [55, 70, 60, 80];
+      var n = HERO_TICKERS.length;
+
+      function makeTile(tk) {
         var t = document.createElement('div');
-        t.className = 'hero-tile' + (REDUCE ? ' settled' : ' scattered');
+        t.className = 'hero-tile';
         t.setAttribute('data-tk', tk);
-        if (!REDUCE) {
-          t.style.setProperty('--dx', (Math.random() * 200 - 100).toFixed(0) + 'px');
-          t.style.setProperty('--dy', (Math.random() * 200 - 100).toFixed(0) + 'px');
-          t.style.setProperty('--r', (Math.random() * 50 - 25).toFixed(0) + 'deg');
-        }
         var img = document.createElement('img');
         img.src = 'logos/' + tk + '.png';
         img.alt = tk;
         img.loading = 'lazy';
         t.appendChild(img);
-        frag.appendChild(t);
-        tiles.push(t);
+        return t;
       }
-      grid.appendChild(frag);
-      if (!REDUCE) {
-        requestAnimationFrame(function () {
-          tiles.forEach(function (t, i) {
-            setTimeout(function () { t.classList.remove('scattered'); t.classList.add('settled'); }, 120 + i * 45);
-          });
-        });
+
+      for (var r = 0; r < ROWS; r++) {
+        var row = document.createElement('div');
+        row.className = 'hero-row ' + (r % 2 === 0 ? 'left' : 'right');
+        row.style.setProperty('--dur', DURS[r % DURS.length] + 's');
+
+        var track = document.createElement('div');
+        track.className = 'hero-row-track';
+
+        // one "set" of tiles, offset per row for variety
+        var set = [];
+        for (var i = 0; i < PER_ROW; i++) {
+          set.push(HERO_TICKERS[(r * 5 + i) % n]);
+        }
+        // duplicate the set so translateX(-50%) loops seamlessly
+        for (var c = 0; c < 2; c++) {
+          for (var j = 0; j < set.length; j++) {
+            var tile = makeTile(set[j]);
+            if (c === 1) tile.setAttribute('aria-hidden', 'true');
+            track.appendChild(tile);
+          }
+        }
+        row.appendChild(track);
+        host.appendChild(row);
       }
+
+      var reveal = function () { host.classList.add('visible'); };
+      if (REDUCE) { reveal(); } else { requestAnimationFrame(reveal); }
     })();
 
     // ===== HERO OVERLAY REVEAL =====
