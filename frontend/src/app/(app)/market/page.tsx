@@ -15,6 +15,7 @@ export default function MarketPage() {
       allXStocks={d.allXStocks}
       xStocksLoading={d.xStocksLoading}
       filteredXStocks={d.filteredXStocks}
+      priceMap={d.priceMap}
       xStocksFilter={d.xStocksFilter}
       setXStocksFilter={d.setXStocksFilter}
       xStocksCategory={d.xStocksCategory}
