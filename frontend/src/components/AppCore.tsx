@@ -13,6 +13,7 @@ import { adaptViemWallet } from "@reservoir0x/relay-sdk";
 import { SmartMoneyBadge } from "@/components/smart-money/SmartMoneyBadge";
 import { useStocky } from "@/components/concierge/StockyContext";
 import { setXStockCatalog } from "@/lib/intelligence/xstocks";
+import { REFERENCE_QUOTES } from "@/lib/marketPrices";
 
 const RelaySwapWidget = dynamic(
   () => import("@reservoir0x/relay-kit-ui").then((mod) => mod.SwapWidget),
@@ -147,6 +148,13 @@ interface XStockAsset {
   networks: string[];
 }
 
+// A live price for an xStock. `change` (24h %) is only present for assets that
+// have a reference quote; on-chain pool prices provide `price` only.
+export interface LivePrice {
+  price: number;
+  change?: number;
+}
+
 interface NansenToken {
   chain: string;
   token_symbol: string;
@@ -227,6 +235,11 @@ function useAppDataState() {
   const [chatLoading, setChatLoading] = useState(false);
   const [allXStocks, setAllXStocks] = useState<XStockAsset[]>([]);
   const [xStocksLoading, setXStocksLoading] = useState(true);
+  const [priceMap, setPriceMap] = useState<Record<string, LivePrice>>(() => {
+    const seed: Record<string, LivePrice> = {};
+    for (const q of REFERENCE_QUOTES) seed[q.symbol] = { price: q.price, change: q.change };
+    return seed;
+  });
   const [xStocksFilter, setXStocksFilter] = useState("");
   const [xStocksCategory, setXStocksCategory] = useState<"all" | "bridgeable" | "popular">("all");
   const [portfolioSelected, setPortfolioSelected] = useState<Record<string, number>>({});
@@ -414,6 +427,29 @@ function useAppDataState() {
     fetchXStocks();
   }, []);
 
+  // Live USD prices straight from the Fluxion V3 pools on Mantle (on-chain, no
+  // backend). Reference quotes (with 24h %) seed the map; on-chain prices fill
+  // in every additional xStock that has a live USDC pool.
+  useEffect(() => {
+    if (!allXStocks.length) return;
+    let cancelled = false;
+    fetchFluxionPrices(allXStocks)
+      .then((onchain) => {
+        if (cancelled || !Object.keys(onchain).length) return;
+        setPriceMap((prev) => {
+          const next = { ...prev };
+          for (const [sym, price] of Object.entries(onchain)) {
+            // Keep reference entries (they carry a real 24h %); only add prices
+            // for symbols we don't already have, so price/24h never desync.
+            if (!next[sym]) next[sym] = { price };
+          }
+          return next;
+        });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [allXStocks.length]);
+
   const filteredXStocks = allXStocks.filter(s => {
     const matchSearch = !xStocksFilter || s.symbol.toLowerCase().includes(xStocksFilter.toLowerCase()) || s.name.toLowerCase().includes(xStocksFilter.toLowerCase());
     if (!matchSearch) return false;
@@ -522,7 +558,7 @@ function useAppDataState() {
     strategyAiInfo, strategyAiLoading, getStrategyAiInfo,
     selectedStrategy, applyAiStrategy,
     // xstocks
-    allXStocks, xStocksLoading, filteredXStocks,
+    allXStocks, xStocksLoading, filteredXStocks, priceMap,
     xStocksFilter, setXStocksFilter, xStocksCategory, setXStocksCategory,
     aiStockInfo, aiStockLoading, getStockAiInfo,
     // wallet
@@ -541,12 +577,13 @@ function useAppDataState() {
 /* ========== MARKET TAB ========== */
 export function MarketTab({
   strategies, activeStrategy, setActiveStrategy, strategyAiInfo, strategyAiLoading, getStrategyAiInfo,
-  allXStocks, xStocksLoading, filteredXStocks, xStocksFilter, setXStocksFilter, xStocksCategory, setXStocksCategory,
+  allXStocks, xStocksLoading, filteredXStocks, priceMap, xStocksFilter, setXStocksFilter, xStocksCategory, setXStocksCategory,
   aiStockInfo, aiStockLoading, getStockAiInfo, setActiveTab,
 }: {
   strategies: typeof STRATEGIES; activeStrategy: number; setActiveStrategy: (i: number) => void;
   strategyAiInfo: string | null; strategyAiLoading: boolean; getStrategyAiInfo: () => void;
   allXStocks: XStockAsset[]; xStocksLoading: boolean; filteredXStocks: XStockAsset[];
+  priceMap: Record<string, LivePrice>;
   xStocksFilter: string; setXStocksFilter: (v: string) => void;
   xStocksCategory: "all" | "bridgeable" | "popular"; setXStocksCategory: (v: "all" | "bridgeable" | "popular") => void;
   aiStockInfo: Record<string, string>; aiStockLoading: Record<string, boolean>; getStockAiInfo: (s: string) => void;
@@ -557,7 +594,9 @@ export function MarketTab({
 
   return (
     <div className="space-y-6">
-      {/* Strategies section */}
+      {/* The preset strategies / allocation / AI-signals block lives on the
+          dedicated Strategies tab — Market focuses on the live xStocks list. */}
+      {false && (
       <div>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold">Strategies</h2>
@@ -677,9 +716,7 @@ export function MarketTab({
           </div>
         )}
       </div>
-
-      {/* Divider */}
-      <div className="border-t border-white/5" />
+      )}
 
       {/* xStocks Assets section */}
       <div>
@@ -727,11 +764,7 @@ export function MarketTab({
               return (
                 <div key={stock.symbol} className="p-4 rounded-xl border border-white/5 bg-white/[0.015] hover:border-white/10 hover:bg-white/[0.03] transition-all duration-200">
                   <div className="flex items-center gap-2.5 mb-2">
-                    {stock.logo ? (
-                      <img src={stock.logo} alt={stock.symbol} className="w-8 h-8 rounded-lg bg-white/5 object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                    ) : (
-                      <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500/20 to-indigo-500/20 flex items-center justify-center text-[10px] font-bold text-blue-400">{stock.symbol.slice(0, 2)}</div>
-                    )}
+                    <TokenIcon token={{ symbol: stock.symbol, logo: stock.logo }} size={32} />
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-bold text-white/90 truncate">{stock.symbol}</div>
                       <div className="text-[10px] text-white/40 truncate">{stock.name}</div>
@@ -740,6 +773,20 @@ export function MarketTab({
                       <span className="text-[8px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full border border-emerald-500/20">BRIDGE</span>
                     )}
                   </div>
+
+                  {/* Live price / 24h — on-chain Fluxion price; "—" when no live market */}
+                  {(() => {
+                    const p = priceMap[stock.symbol];
+                    const up = (p?.change ?? 0) >= 0;
+                    return (
+                      <div className="flex items-baseline justify-between mb-2">
+                        <span className="text-[13px] font-semibold text-white/90 tabular-nums">{p ? `$${p.price.toFixed(2)}` : "—"}</span>
+                        <span className="text-[11px] font-medium tabular-nums" style={{ color: p?.change !== undefined ? (up ? "#34e3b0" : "#ff6b81") : "rgba(255,255,255,0.3)" }}>
+                          {p?.change !== undefined ? `${up ? "+" : ""}${p.change.toFixed(2)}%` : "—"}
+                        </span>
+                      </div>
+                    );
+                  })()}
 
                   {/* Smart Money badge */}
                   <div className="mb-2">
@@ -1525,6 +1572,63 @@ const QUOTE_TOKENS: { symbol: string; address: string; decimals: number; logo?: 
 const FEE_TIERS = [3000, 500, 10000] as const;
 const FEE_TICK_SPACING: Record<number, number> = { 100: 1, 500: 10, 3000: 60, 10000: 200 };
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+// Read live USD prices for every xStock that has a Fluxion V3 USDC pool on
+// Mantle, directly on-chain (factory.getPool + pool.slot0). Returns a map of
+// xStock symbol -> price in USDC. Never throws.
+async function fetchFluxionPrices(stocks: { symbol: string; mantleAddress: string }[]): Promise<Record<string, number>> {
+  try {
+    type Cand = { symbol: string; wrapped: string; fee: number };
+    const cands: Cand[] = [];
+    for (const s of stocks) {
+      const wrapped = UNWRAPPED_TO_WRAPPED[s.mantleAddress.toLowerCase()];
+      if (!wrapped) continue;
+      for (const fee of FEE_TIERS) cands.push({ symbol: s.symbol, wrapped, fee });
+    }
+    if (!cands.length) return {};
+
+    const poolAddrs: string[] = await mantleClient.multicall({
+      allowFailure: true,
+      contracts: cands.map((c) => ({
+        address: FLUXION_FACTORY as `0x${string}`, abi: FACTORY_GET_POOL_ABI, functionName: "getPool",
+        args: [c.wrapped as `0x${string}`, USDC_MANTLE as `0x${string}`, c.fee],
+      })),
+    }).then((rows: any[]) => rows.map((r) => (r.status === "success" ? (r.result as string) : ZERO_ADDRESS)));
+
+    const live = cands.map((c, i) => ({ c, pool: poolAddrs[i] })).filter((x) => x.pool && x.pool !== ZERO_ADDRESS);
+    if (!live.length) return {};
+
+    const slots: any[] = await mantleClient.multicall({
+      allowFailure: true,
+      contracts: live.map((l) => ({ address: l.pool as `0x${string}`, abi: POOL_SLOT0_ABI, functionName: "slot0" })),
+    });
+
+    const usdc = USDC_MANTLE.toLowerCase();
+    const out: Record<string, number> = {};
+    for (let i = 0; i < live.length; i++) {
+      const { c, pool } = live[i];
+      void pool;
+      const slot0 = slots[i];
+      if (slot0.status !== "success" || !slot0.result) continue;
+      const sqrtP = Number(slot0.result[0] as bigint);
+      if (!sqrtP) continue;
+      const tokenAddr = c.wrapped.toLowerCase();
+      const aDecimals = 18; // wrapped vault tokens are 18 decimals
+      const bDecimals = 6;  // USDC
+      const token0 = tokenAddr < usdc ? tokenAddr : usdc;
+      const token1 = tokenAddr < usdc ? usdc : tokenAddr;
+      const dec0 = token0 === usdc ? bDecimals : aDecimals;
+      const dec1 = token1 === usdc ? bDecimals : aDecimals;
+      const price1per0 = (sqrtP / 2 ** 96) ** 2 * (10 ** dec0) / (10 ** dec1);
+      const aIsToken0 = token0 === tokenAddr;
+      const priceUsd = aIsToken0 ? price1per0 : (price1per0 ? 1 / price1per0 : 0);
+      if (priceUsd > 0 && Number.isFinite(priceUsd) && !out[c.symbol]) out[c.symbol] = priceUsd;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
 
 const POOL_LIQUIDITY_ABI = [{ inputs: [], name: "liquidity", outputs: [{ name: "", type: "uint128" }], stateMutability: "view", type: "function" }] as const;
 const ERC4626_ABI = [
@@ -2836,6 +2940,34 @@ type AutopilotStatus = {
   decision_count: number;
 };
 
+// Canonical 3-layer target weights per regime (basis points): xStocks / USDY / mETH.
+// Mirrors the autonomous agent's policy and the on-chain guardrails.
+const REGIME_TARGETS: Record<number, [number, number, number]> = {
+  2: [5500, 2000, 2500], // risk-on
+  1: [4000, 4000, 2000], // neutral
+  0: [2000, 6500, 1500], // risk-off
+};
+const GUARDRAIL_MAX_ASSET_BPS = 7500;     // no single layer above 75%
+const GUARDRAIL_MIN_USDY_RISKOFF_BPS = 5000; // risk-off keeps USDY >= 50%
+
+type CyclePreview = {
+  regime: number;
+  weights: [number, number, number];
+  notional: number;
+  legs: { layer: string; pct: number; usd: number }[];
+  guardrailsOk: boolean;
+};
+
+function buildCyclePreview(regime: number, notional: number): CyclePreview {
+  const weights = REGIME_TARGETS[regime] ?? REGIME_TARGETS[1];
+  const layers = ["xStocks", "USDY", "mETH"];
+  const legs = weights.map((bps, i) => ({ layer: layers[i], pct: bps / 100, usd: (notional * bps) / 10000 }));
+  const sum = weights[0] + weights[1] + weights[2];
+  const withinMax = weights.every((w) => w <= GUARDRAIL_MAX_ASSET_BPS);
+  const riskOffOk = regime !== 0 || weights[1] >= GUARDRAIL_MIN_USDY_RISKOFF_BPS;
+  return { regime, weights, notional, legs, guardrailsOk: sum === 10000 && withinMax && riskOffOk };
+}
+
 function regimeMeta(regime: number): { label: string; text: string; bg: string; ring: string; dot: string } {
   switch (regime) {
     case 2: return { label: "Risk-on", text: "text-emerald-300", bg: "bg-emerald-500/10", ring: "border-emerald-500/30", dot: "#10b981" };
@@ -2858,6 +2990,7 @@ export function AutopilotTabContent() {
   const [selSymbols, setSelSymbols] = useState<string[]>(["AAPLx", "NVDAx", "SPYx"]);
   const [riskProfile, setRiskProfile] = useState<string>("balanced");
   const [now, setNow] = useState<number>(Math.floor(Date.now() / 1000));
+  const [preview, setPreview] = useState<CyclePreview | null>(null);
 
   // Tick for the live countdown.
   useEffect(() => {
@@ -2949,10 +3082,19 @@ export function AutopilotTabContent() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
       setBackendOk(true);
+      setPreview(null);
       setNotice(d?.tx_hash ? "Cycle complete — decision recorded on-chain." : "Cycle complete (on-chain record skipped — no signer).");
       await Promise.all([loadOnChain(), loadStatus()]);
     } catch {
-      setError("Backend unreachable — 'Run now' needs the AI agent at " + BACKEND_URL);
+      // No live agent backend in this deployment — compute a transparent local
+      // preview of the cycle from the latest on-chain regime so the flow is
+      // still demonstrable. The actual multi-signal classification and the
+      // on-chain recordDecision are performed by the autonomous agent wallet
+      // (its real history is shown below).
+      const regime = decisions[0]?.regime ?? 1;
+      setPreview(buildCyclePreview(regime, 1000));
+      setBackendOk(false);
+      setNotice("Computed a cycle preview from the latest on-chain regime. Live multi-signal cycles and on-chain recordDecision run in the autonomous agent — its real decisions are listed below.");
     } finally {
       setRunning(false);
     }
@@ -3008,6 +3150,33 @@ export function AutopilotTabContent() {
 
       {error && <div className="mb-4 p-3 rounded-lg border border-red-500/30 bg-red-500/10 text-[11px] text-red-200">{error}</div>}
       {notice && <div className="mb-4 p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-[11px] text-emerald-200">{notice}</div>}
+
+      {/* Cycle preview — signals → regime → target weights → planned USDC↔asset swaps */}
+      {preview && (() => { const m = regimeMeta(preview.regime); return (
+        <div className="mb-5 p-4 rounded-xl border border-blue-500/20 bg-blue-500/[0.04]">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-[10px] uppercase tracking-wide text-blue-300/80">Cycle preview · target rebalance on ${preview.notional.toLocaleString()} USDC</div>
+            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border ${m.ring} ${m.bg} ${m.text}`}>
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />{m.label}
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {preview.legs.map((leg) => (
+              <div key={leg.layer} className="p-3 rounded-lg border border-white/10 bg-white/[0.02]">
+                <div className="text-[11px] text-white/55">USDC → {leg.layer}</div>
+                <div className="text-[15px] font-semibold text-white/90 tabular-nums mt-0.5">${leg.usd.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                <div className="text-[10px] text-white/40 tabular-nums">{leg.pct.toFixed(0)}% target</div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex items-center gap-2 text-[10px]">
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border ${preview.guardrailsOk ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-red-500/30 bg-red-500/10 text-red-300"}`}>
+              {preview.guardrailsOk ? "Guardrails ✓" : "Guardrails ✗"}
+            </span>
+            <span className="text-white/40">Σ = 100% · each layer ≤ 75%{preview.regime === 0 ? " · risk-off USDY ≥ 50%" : ""}</span>
+          </div>
+        </div>
+      ); })()}
 
       {/* Top grid: regime + target donut + layers */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-4 mb-5">
