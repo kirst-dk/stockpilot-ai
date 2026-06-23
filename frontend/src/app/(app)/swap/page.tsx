@@ -3,10 +3,27 @@
 import { useState } from "react";
 import { ArrowLeftRight, Droplets } from "lucide-react";
 import { SwapTab, PoolsTab, useAppData } from "@/components/AppCore";
+import { POOLS_ENABLED } from "@/lib/flags";
 
 export default function SwapPage() {
   const d = useAppData();
   const [view, setView] = useState<"swap" | "pools">("swap");
+
+  // Pools are gated behind NEXT_PUBLIC_ENABLE_POOLS. When disabled, render the
+  // Swap UI on its own with no toggle and no path into the pools view.
+  if (!POOLS_ENABLED) {
+    return (
+      <div className="space-y-5">
+        <SwapTab
+          walletClient={d.walletClient}
+          isConnected={d.isConnected}
+          address={d.address}
+          allXStocks={d.allXStocks}
+          publicClient={d.publicClient}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">

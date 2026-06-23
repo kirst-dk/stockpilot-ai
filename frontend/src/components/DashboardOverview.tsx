@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
   TrendingUp, TrendingDown, ArrowUpRight, Wallet, Layers, Globe2,
-  ArrowLeftRight, Sparkles, BarChart3,
+  Sparkles, BarChart3,
 } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { TokenIcon, useAppData } from "@/components/AppCore";
@@ -73,11 +73,23 @@ export function DashboardOverview() {
   const series = useMemo(() => seededSeries(featured.price, featured.change), [featured]);
   const featUp = featured.change >= 0;
 
+  // Build the table from the live price map so every row has a real price.
+  // Assets that carry a 24h % (reference feed) sort first, so the table never
+  // shows a half-empty mix of priced and unpriced rows.
   const marketRows = useMemo(() => {
-    const bySym = new Map(quotes.map((q) => [q.symbol, q]));
-    const list = (d.allXStocks.length ? d.allXStocks : quotes.map((q) => ({ symbol: q.symbol, name: q.name, logo: undefined, mantleAddress: "", networks: [] as string[] })));
-    return list.slice(0, 8).map((s) => ({ ...s, quote: bySym.get(s.symbol) }));
-  }, [d.allXStocks, quotes]);
+    const nameBy = new Map<string, string>();
+    const logoBy = new Map<string, string | undefined>();
+    for (const s of d.allXStocks) { nameBy.set(s.symbol, s.name); logoBy.set(s.symbol, s.logo); }
+    for (const q of quotes) if (!nameBy.has(q.symbol)) nameBy.set(q.symbol, q.name);
+    const rows = Object.entries(d.priceMap).map(([symbol, p]) => ({
+      symbol, name: nameBy.get(symbol) || symbol, logo: logoBy.get(symbol),
+      price: p.price, change: p.change,
+    }));
+    rows.sort((a, b) =>
+      (b.change !== undefined ? 1 : 0) - (a.change !== undefined ? 1 : 0)
+      || a.symbol.localeCompare(b.symbol));
+    return rows.slice(0, 12);
+  }, [d.priceMap, d.allXStocks, quotes]);
 
   return (
     <div className="space-y-6">
@@ -100,9 +112,9 @@ export function DashboardOverview() {
         </div>
       </section>
 
-      {/* Chart + exchange panel */}
-      <div className="grid lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 min-w-0 sp-glass p-5">
+      {/* Price chart */}
+      <div className="grid grid-cols-1 gap-4">
+        <div className="min-w-0 sp-glass p-5">
           <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
             <div className="flex items-center gap-3">
               <TokenIcon token={{ symbol: featured.symbol }} size={36} />
@@ -156,34 +168,6 @@ export function DashboardOverview() {
             ))}
           </div>
         </div>
-
-        {/* Quick trade panel */}
-        <div className="min-w-0 sp-glass-strong p-5 flex flex-col">
-          <h3 className="font-display font-semibold text-white text-[15px] flex items-center gap-2"><ArrowLeftRight size={15} className="text-violet-300" /> Quick Trade</h3>
-          <p className="text-[12px] text-white/45 mt-1 leading-relaxed">Swap USDC into any xStock natively on Fluxion AMM — no off-ramp, fully on-chain.</p>
-
-          <div className="mt-4 space-y-2">
-            <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
-              <div className="text-[10.5px] text-white/40">You pay</div>
-              <div className="flex items-center justify-between mt-1">
-                <span className="font-display text-[18px] text-white">100.00</span>
-                <span className="text-[12.5px] font-semibold text-white/80 px-2.5 py-1 rounded-lg bg-white/5">USDC</span>
-              </div>
-            </div>
-            <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
-              <div className="text-[10.5px] text-white/40">You receive ≈</div>
-              <div className="flex items-center justify-between mt-1">
-                <span className="font-display text-[18px] text-white tabular-nums">{(100 / featured.price).toFixed(4)}</span>
-                <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-white/80 px-2.5 py-1 rounded-lg bg-white/5">
-                  <TokenIcon token={{ symbol: featured.symbol }} size={16} /> {featured.symbol}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <Link href="/swap" className="sp-btn-primary text-center text-[13.5px] py-2.5 mt-4">Open Swap</Link>
-          <Link href="/bridge" className="text-center text-[12.5px] py-2.5 mt-2 rounded-xl border border-white/[0.08] text-white/70 hover:text-white hover:border-white/20 transition-colors">Bridge assets →</Link>
-        </div>
       </div>
 
       {/* Market overview table */}
@@ -204,7 +188,7 @@ export function DashboardOverview() {
             </thead>
             <tbody>
               {marketRows.map((r) => {
-                const up = (r.quote?.change ?? 0) >= 0;
+                const up = (r.change ?? 0) >= 0;
                 return (
                   <tr key={r.symbol} className="border-t border-white/[0.05] hover:bg-white/[0.02]">
                     <td className="px-5 py-3">
@@ -216,9 +200,9 @@ export function DashboardOverview() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-3 py-3 text-right text-[13px] text-white/85 tabular-nums">{r.quote ? `$${r.quote.price.toFixed(2)}` : "—"}</td>
-                    <td className="px-3 py-3 text-right text-[12.5px] font-medium tabular-nums" style={{ color: r.quote ? (up ? "#34e3b0" : "#ff6b81") : "rgba(255,255,255,0.3)" }}>
-                      {r.quote ? `${up ? "+" : ""}${r.quote.change.toFixed(2)}%` : "—"}
+                    <td className="px-3 py-3 text-right text-[13px] text-white/85 tabular-nums">${r.price.toFixed(2)}</td>
+                    <td className="px-3 py-3 text-right text-[12.5px] font-medium tabular-nums" style={{ color: r.change !== undefined ? (up ? "#34e3b0" : "#ff6b81") : "rgba(255,255,255,0.3)" }}>
+                      {r.change !== undefined ? `${up ? "+" : ""}${r.change.toFixed(2)}%` : "—"}
                     </td>
                     <td className="px-5 py-3 text-right hidden sm:table-cell">
                       <Link href="/swap" className="text-[12px] font-semibold text-emerald-300 hover:text-emerald-200">Trade</Link>

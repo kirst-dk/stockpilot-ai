@@ -2,11 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
+/* =================================================================
+   StockPilot AI — REDESIGNED visual layer (drop-in globals.css)
+   ------------------------------------------------------------------
+   Same class names + CSS variables as before, so NO markup/layout
+   changes are required. This only upgrades the *visual* layer:
+   real depth, layered light, tactile glass, film grain, and a
+   refined palette — so the UI stops looking flat & "default-AI".
+   ================================================================= */
+
 @layer base {
   :root {
-    --background: 224 71% 4%;
+    --background: 222 60% 4%;
     --foreground: 213 31% 91%;
-    --card: 224 71% 6%;
+    --card: 222 50% 6%;
     --card-foreground: 213 31% 91%;
     --primary: 210 40% 98%;
     --primary-foreground: 222.2 47.4% 11.2%;
@@ -19,47 +28,282 @@
     --border: 216 34% 17%;
     --input: 216 34% 17%;
     --ring: 216 77% 56%;
-    --radius: 0.75rem;
+    --radius: 0.85rem;
   }
 }
 
 @layer base {
-  * {
-    @apply border-border;
-  }
+  * { @apply border-border; }
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: "Satoshi", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
 }
 
-/* Smooth scrolling */
-html {
-  scroll-behavior: smooth;
-}
+html { scroll-behavior: smooth; }
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-}
-::-webkit-scrollbar-track {
-  background: hsl(var(--background));
-}
+/* Branded scrollbar */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--border));
-  border-radius: 3px;
+  background: linear-gradient(180deg, rgba(47,230,176,.35), rgba(124,107,255,.35));
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground));
+  background: linear-gradient(180deg, rgba(47,230,176,.6), rgba(124,107,255,.6));
+  background-clip: padding-box;
 }
 
-/* Relay Widget container styles */
-.relay-widget-container {
-  min-height: 400px;
+/* ============================================================
+   Brand design system — mint + blue-violet, now with depth.
+   Fonts: Clash Display (display) + Satoshi (body).
+   ============================================================ */
+:root {
+  --sp-bg: #060912;
+  --sp-bg-2: #0a0f1d;
+  --sp-ink: #04060d;
+
+  /* layered translucent surfaces */
+  --sp-surface: rgba(255, 255, 255, 0.045);
+  --sp-surface-2: rgba(255, 255, 255, 0.06);
+  --sp-border: rgba(255, 255, 255, 0.09);
+  --sp-border-strong: rgba(255, 255, 255, 0.16);
+
+  /* brand */
+  --sp-mint: #2fe6b0;
+  --sp-mint-soft: #5cf0c6;
+  --sp-violet: #7c6bff;
+  --sp-violet-soft: #9d90ff;
+  /* warm micro-accent breaks the cold mint/violet cliche */
+  --sp-gold: #ffcf7a;
+
+  --sp-text: #eef3f9;
+  --sp-muted: rgba(238, 243, 249, 0.58);
+  --sp-faint: rgba(238, 243, 249, 0.36);
+  --sp-sidebar-w: 248px;
+
+  /* reusable depth tokens */
+  --sp-shadow-card:
+    0 1px 0 rgba(255,255,255,.07) inset,
+    0 -18px 40px -28px rgba(0,0,0,.8) inset,
+    0 24px 48px -28px rgba(2,4,10,.85),
+    0 4px 14px -8px rgba(2,4,10,.6);
+  --sp-glow-mint: 0 0 0 1px rgba(47,230,176,.25), 0 12px 40px -12px rgba(47,230,176,.45);
+  --sp-glow-violet: 0 0 0 1px rgba(124,107,255,.25), 0 12px 40px -12px rgba(124,107,255,.45);
 }
-/* Center the widget and let it shrink on small screens.
-   The Relay widget renders with a fixed width (408px / min-width 300px);
-   we center it on desktop and allow it to fill narrow viewports. */
+
+/* Ambient room light: layered blooms + deep ink base */
+body {
+  position: relative;
+  background:
+    radial-gradient(1200px 680px at 8% -10%, rgba(124,107,255,.20), transparent 58%),
+    radial-gradient(1000px 620px at 104% -4%, rgba(47,230,176,.16), transparent 54%),
+    radial-gradient(900px 900px at 50% 120%, rgba(124,107,255,.10), transparent 60%),
+    linear-gradient(180deg, var(--sp-bg-2), var(--sp-bg) 40%, var(--sp-ink));
+  background-attachment: fixed;
+}
+
+/* Film grain — kills the sterile, plasticky "AI gradient" flatness */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: .05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Soft vignette for focus + depth */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(130% 100% at 50% 0%, transparent 55%, rgba(2,4,10,.55) 100%);
+}
+
+.font-display {
+  font-family: "Clash Display", "Satoshi", "Inter", sans-serif;
+  letter-spacing: -0.02em;
+}
+
+/* ---------- Glass surfaces with real elevation ---------- */
+.sp-glass {
+  position: relative;
+  background:
+    linear-gradient(168deg, rgba(255,255,255,.07), rgba(255,255,255,.02) 60%),
+    var(--sp-surface);
+  border: 1px solid var(--sp-border);
+  border-radius: 1.05rem;
+  backdrop-filter: blur(16px) saturate(135%);
+  -webkit-backdrop-filter: blur(16px) saturate(135%);
+  box-shadow: var(--sp-shadow-card);
+}
+
+.sp-glass-strong {
+  position: relative;
+  background:
+    linear-gradient(165deg, rgba(255,255,255,.10), rgba(255,255,255,.03) 55%),
+    var(--sp-surface-2);
+  border: 1px solid var(--sp-border-strong);
+  border-radius: 1.15rem;
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: var(--sp-shadow-card);
+}
+/* premium hairline of light on the top edge */
+.sp-glass-strong::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(120deg, rgba(47,230,176,.55), rgba(124,107,255,.45) 55%, transparent 80%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  opacity: .55;
+  pointer-events: none;
+}
+
+/* Hover: gentle lift + ambient glow instead of flat color swap */
+.sp-card-hover {
+  transition: border-color .22s ease, transform .22s cubic-bezier(.2,.7,.2,1),
+    box-shadow .22s ease, background .22s ease;
+}
+.sp-card-hover:hover {
+  border-color: var(--sp-border-strong);
+  transform: translateY(-3px);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.10) inset,
+    0 28px 60px -26px rgba(2,4,10,.9),
+    0 10px 32px -16px rgba(124,107,255,.35);
+}
+
+/* ---------- Brand gradient helpers ---------- */
+.sp-grad-text {
+  background: linear-gradient(100deg, var(--sp-mint), var(--sp-violet-soft) 70%, var(--sp-gold));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 28px rgba(124,107,255,.18);
+}
+.sp-grad-bg { background: linear-gradient(110deg, var(--sp-mint), var(--sp-violet)); }
+.sp-grad-border {
+  position: relative;
+  background: linear-gradient(110deg, rgba(47,230,176,.5), rgba(124,107,255,.5));
+}
+
+/* ---------- Dimensional pill buttons ---------- */
+.sp-btn-primary {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.22), rgba(255,255,255,0) 42%),
+    linear-gradient(110deg, var(--sp-mint), var(--sp-violet));
+  color: #04130d;
+  font-weight: 700;
+  border-radius: 0.78rem;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.4) inset,
+    0 -2px 8px rgba(0,0,0,.25) inset,
+    0 10px 26px -10px rgba(47,230,176,.55),
+    0 8px 22px -12px rgba(124,107,255,.5);
+  transition: filter .18s ease, transform .12s ease, box-shadow .18s ease;
+}
+/* moving sheen */
+.sp-btn-primary::after {
+  content: "";
+  position: absolute;
+  top: 0; left: -60%;
+  width: 45%; height: 100%;
+  background: linear-gradient(110deg, transparent, rgba(255,255,255,.45), transparent);
+  transform: skewX(-18deg);
+  transition: left .55s ease;
+}
+.sp-btn-primary:hover { filter: brightness(1.06); }
+.sp-btn-primary:hover::after { left: 120%; }
+.sp-btn-primary:active { transform: scale(.975); }
+
+/* Secondary / ghost button (additive, optional to use) */
+.sp-btn-ghost {
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--sp-border-strong);
+  color: var(--sp-text);
+  font-weight: 600;
+  border-radius: 0.78rem;
+  backdrop-filter: blur(10px);
+  transition: background .18s ease, border-color .18s ease, transform .12s ease;
+}
+.sp-btn-ghost:hover { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.28); }
+.sp-btn-ghost:active { transform: scale(.985); }
+
+/* ---------- Sidebar nav link ---------- */
+.sp-nav-link {
+  position: relative;
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.62rem 0.85rem; border-radius: 0.78rem;
+  color: var(--sp-muted); font-weight: 500; font-size: 0.875rem;
+  transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+  border: 1px solid transparent;
+}
+.sp-nav-link:hover {
+  color: var(--sp-text);
+  background: linear-gradient(100deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+}
+.sp-nav-link[data-active="true"] {
+  color: #04130d;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.25), rgba(255,255,255,0) 45%),
+    linear-gradient(110deg, var(--sp-mint), var(--sp-violet-soft));
+  font-weight: 700;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.45) inset,
+    0 8px 24px -8px rgba(47,230,176,.55);
+}
+/* glowing accent bar on the active item */
+.sp-nav-link[data-active="true"]::before {
+  content: "";
+  position: absolute;
+  left: -6px; top: 18%; bottom: 18%;
+  width: 3px; border-radius: 999px;
+  background: linear-gradient(180deg, var(--sp-mint), var(--sp-violet));
+  box-shadow: 0 0 12px rgba(47,230,176,.8);
+}
+
+/* ---------- Content grid: organic, fades out (not a sterile mesh) ---------- */
+.sp-grid-bg {
+  background-image:
+    linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px);
+  background-size: 58px 58px;
+  -webkit-mask-image: radial-gradient(120% 90% at 50% 0%, #000 35%, transparent 78%);
+          mask-image: radial-gradient(120% 90% at 50% 0%, #000 35%, transparent 78%);
+}
+
+/* glow chip / badge helper (additive) */
+.sp-chip {
+  display: inline-flex; align-items: center; gap: .4rem;
+  padding: .25rem .6rem; border-radius: 999px;
+  font-size: .72rem; font-weight: 600; letter-spacing: .02em;
+  background: rgba(47,230,176,.10);
+  border: 1px solid rgba(47,230,176,.28);
+  color: var(--sp-mint-soft);
+}
+
+/* hide scrollbar on horizontal rails */
+.sp-noscroll::-webkit-scrollbar { display: none; }
+.sp-noscroll { scrollbar-width: none; }
+
+/* ---------- Relay widget container styles ---------- */
+.relay-widget-container { min-height: 400px; }
 .relay-widget-container > div {
   width: 100% !important;
   max-width: 100% !important;
@@ -101,8 +345,8 @@ html {
   --relay-colors-slate-10: #cbd5e1 !important;
   --relay-colors-slate-11: #e2e8f0 !important;
   --relay-colors-slate-12: #f1f5f9 !important;
-  --relay-colors-widget-background: #0d1220 !important;
-  --relay-colors-modal-background: #0f172a !important;
+  --relay-colors-widget-background: #0b0f1c !important;
+  --relay-colors-modal-background: #0c1424 !important;
   --relay-colors-subtle-background-color: #111827 !important;
   --relay-colors-input-background: rgba(255,255,255,0.05) !important;
   --relay-colors-dropdown-background: #111827 !important;
@@ -115,11 +359,8 @@ html {
   color: #f1f5f9;
 }
 
-/* Relay Kit modal/dialog centering */
 [data-radix-dialog-overlay],
-[data-radix-popper-content-wrapper] {
-  z-index: 9999 !important;
-}
+[data-radix-popper-content-wrapper] { z-index: 9999 !important; }
 [data-radix-dialog-overlay] {
   position: fixed !important;
   inset: 0 !important;
@@ -135,118 +376,52 @@ html {
   transform: none !important;
 }
 
-/* Ticker scroll animation */
+/* ---------- Animations ---------- */
 @keyframes scroll {
   0% { transform: translateX(0); }
   100% { transform: translateX(-50%); }
 }
-
-/* Token selector modal entrance */
 @keyframes slideUp {
   0% { opacity: 0; transform: translateY(12px); }
   100% { opacity: 1; transform: translateY(0); }
 }
+@keyframes sp-float {
+  0%,100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; scroll-behavior: auto !important; }
+  .sp-btn-primary::after { display: none; }
+}
 
 /* ============================================================
-   StockPilot — brand design system (mint + blue-violet)
-   New multi-route shell. Fonts: Clash Display (display) + Satoshi (body).
+   Additive layer — terminal numerals + a11y polish.
+   Does not alter layout; only typography of numbers + focus/cursor.
    ============================================================ */
+
+/* Terminal-style numerals: monospaced tabular figures for all data
+   readouts (prices / %), so numbers feel like a trading terminal.
+   Wins over .font-display by source order. */
 :root {
-  --sp-bg: #070a12;
-  --sp-bg-2: #0a0e1a;
-  --sp-surface: rgba(255, 255, 255, 0.035);
-  --sp-surface-2: rgba(255, 255, 255, 0.05);
-  --sp-border: rgba(255, 255, 255, 0.08);
-  --sp-border-strong: rgba(255, 255, 255, 0.14);
-  --sp-mint: #2fe6b0;
-  --sp-mint-soft: #5cf0c6;
-  --sp-violet: #7c6bff;
-  --sp-violet-soft: #9d90ff;
-  --sp-text: #eef2f7;
-  --sp-muted: rgba(238, 242, 247, 0.55);
-  --sp-faint: rgba(238, 242, 247, 0.34);
-  --sp-sidebar-w: 248px;
+  --sp-mono: "JetBrains Mono", "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace;
 }
-
-body {
-  background:
-    radial-gradient(1100px 600px at 12% -8%, rgba(124, 107, 255, 0.16), transparent 60%),
-    radial-gradient(900px 560px at 100% 0%, rgba(47, 230, 176, 0.12), transparent 55%),
-    var(--sp-bg);
-  font-family: "Satoshi", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-
-.font-display {
-  font-family: "Clash Display", "Satoshi", "Inter", sans-serif;
+.tabular-nums {
+  font-family: var(--sp-mono);
+  font-feature-settings: "tnum" 1, "cv01" 1;
+  font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
 }
+.font-display.tabular-nums { letter-spacing: -0.02em; }
 
-/* Glass surfaces */
-.sp-glass {
-  background: var(--sp-surface);
-  border: 1px solid var(--sp-border);
-  border-radius: 1rem;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-.sp-glass-strong {
-  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.025));
-  border: 1px solid var(--sp-border-strong);
-  border-radius: 1.1rem;
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-}
-.sp-card-hover { transition: border-color .2s ease, transform .2s ease, background .2s ease; }
-.sp-card-hover:hover { border-color: var(--sp-border-strong); transform: translateY(-2px); }
+/* Clickable affordance on all interactive elements */
+button:not(:disabled), [role="button"]:not([aria-disabled="true"]), a[href],
+summary, label[for], select { cursor: pointer; }
+button:disabled, [aria-disabled="true"] { cursor: not-allowed; }
 
-/* Brand gradient helpers */
-.sp-grad-text {
-  background: linear-gradient(100deg, var(--sp-mint), var(--sp-violet-soft));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+/* Visible keyboard focus ring (brand-tinted, not the default blue) */
+:focus-visible {
+  outline: 2px solid rgba(47, 230, 176, 0.7);
+  outline-offset: 2px;
+  border-radius: 6px;
 }
-.sp-grad-bg { background: linear-gradient(110deg, var(--sp-mint), var(--sp-violet)); }
-.sp-grad-border {
-  position: relative;
-  background: linear-gradient(110deg, rgba(47,230,176,.5), rgba(124,107,255,.5));
-}
-
-/* Pill buttons */
-.sp-btn-primary {
-  background: linear-gradient(110deg, var(--sp-mint), var(--sp-violet));
-  color: #06110d;
-  font-weight: 700;
-  border-radius: 0.7rem;
-  transition: filter .18s ease, transform .18s ease;
-}
-.sp-btn-primary:hover { filter: brightness(1.08); }
-.sp-btn-primary:active { transform: scale(.98); }
-
-/* Sidebar nav link */
-.sp-nav-link {
-  display: flex; align-items: center; gap: 0.75rem;
-  padding: 0.6rem 0.8rem; border-radius: 0.7rem;
-  color: var(--sp-muted); font-weight: 500; font-size: 0.875rem;
-  transition: background .18s ease, color .18s ease;
-  border: 1px solid transparent;
-}
-.sp-nav-link:hover { color: var(--sp-text); background: var(--sp-surface); }
-.sp-nav-link[data-active="true"] {
-  color: #06110d;
-  background: linear-gradient(110deg, var(--sp-mint), var(--sp-violet-soft));
-  font-weight: 700;
-  box-shadow: 0 6px 22px -8px rgba(47,230,176,.5);
-}
-
-/* subtle dotted bg used inside content */
-.sp-grid-bg {
-  background-image:
-    linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
-  background-size: 56px 56px;
-}
-
-/* hide scrollbar on horizontal rails */
-.sp-noscroll::-webkit-scrollbar { display: none; }
-.sp-noscroll { scrollbar-width: none; }
