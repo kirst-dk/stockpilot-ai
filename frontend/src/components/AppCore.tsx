@@ -14,6 +14,7 @@ import { SmartMoneyBadge } from "@/components/smart-money/SmartMoneyBadge";
 import { useStocky } from "@/components/concierge/StockyContext";
 import { setXStockCatalog } from "@/lib/intelligence/xstocks";
 import { useLiveQuotes } from "@/lib/marketPrices";
+import { POOLS_ENABLED } from "@/lib/flags";
 
 const RelaySwapWidget = dynamic(
   () => import("@reservoir0x/relay-kit-ui").then((mod) => mod.SwapWidget),
@@ -773,8 +774,14 @@ const UNWRAPPED_TO_WRAPPED: Record<string, string> = {
   "0x7aefc9965699fbea943e03264d96e50cd4a97b21": "0xa24d9c43d64c76acd962003647fd43a85eb44db8", // WMTx
   "0xeedb0273c5af792745180e9ff568cd01550ffa13": "0x448bc811f60eac772775dd53421380e8d4dc4338", // XOMx
 };
-const resolveWrapped = (addr: string) => UNWRAPPED_TO_WRAPPED[addr.toLowerCase()] || addr;
-const isXStock = (addr: string) => !!UNWRAPPED_TO_WRAPPED[addr.toLowerCase()];
+// Auto-discovered xStocks (e.g. SPCXx) are added at runtime from the live Fluxion
+// token list (/api/strategy/tokens) so new listings resolve their wrapper + count
+// as xStocks without any code change.
+const DYNAMIC_WRAPPED: Record<string, string> = {};
+const resolveWrapped = (addr: string) =>
+  UNWRAPPED_TO_WRAPPED[addr.toLowerCase()] || DYNAMIC_WRAPPED[addr.toLowerCase()] || addr;
+const isXStock = (addr: string) =>
+  !!(UNWRAPPED_TO_WRAPPED[addr.toLowerCase()] || DYNAMIC_WRAPPED[addr.toLowerCase()]);
 
 const ERC20_APPROVE_ABI = [{ inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], name: "approve", outputs: [{ type: "bool" }], stateMutability: "nonpayable", type: "function" }] as const;
 const ERC20_ALLOWANCE_ABI = [{ inputs: [{ name: "owner", type: "address" }, { name: "spender", type: "address" }], name: "allowance", outputs: [{ name: "", type: "uint256" }], stateMutability: "view", type: "function" }] as const;
@@ -784,9 +791,14 @@ const SWAP_HELPER_WRAP_AND_SWAP_ABI = [{ inputs: [{ name: "xstock", type: "addre
 const SWAP_HELPER_SWAP_AND_UNWRAP_ABI = [{ inputs: [{ name: "tokenIn", type: "address" }, { name: "wrapper", type: "address" }, { name: "amountIn", type: "uint256" }, { name: "fee", type: "uint24" }, { name: "amountOutMin", type: "uint256" }, { name: "deadline", type: "uint256" }], name: "swapAndUnwrap", outputs: [{ name: "assets", type: "uint256" }], stateMutability: "nonpayable", type: "function" }] as const;
 const MAX_UINT256 = BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
 
+// Agni Finance SwapRouter (Uniswap V3 fork) — the real USDC/USDY pool lives here.
+const AGNI_SWAP_ROUTER = "0x319B69888b0d11cEC22caA5034e25FfFBDc88421";
+
 const FACTORY_GET_POOL_ABI = [{ inputs: [{ name: "tokenA", type: "address" }, { name: "tokenB", type: "address" }, { name: "fee", type: "uint24" }], name: "getPool", outputs: [{ name: "", type: "address" }], stateMutability: "view", type: "function" }] as const;
 const POOL_SLOT0_ABI = [{ inputs: [], name: "slot0", outputs: [{ name: "sqrtPriceX96", type: "uint160" }, { name: "tick", type: "int24" }, { name: "observationIndex", type: "uint16" }, { name: "observationCardinality", type: "uint16" }, { name: "observationCardinalityNext", type: "uint16" }, { name: "feeProtocol", type: "uint8" }, { name: "unlocked", type: "bool" }], stateMutability: "view", type: "function" }] as const;
 const SWAP_ROUTER_ABI = [{ inputs: [{ components: [{ name: "tokenIn", type: "address" }, { name: "tokenOut", type: "address" }, { name: "fee", type: "uint24" }, { name: "recipient", type: "address" }, { name: "deadline", type: "uint256" }, { name: "amountIn", type: "uint256" }, { name: "amountOutMinimum", type: "uint256" }, { name: "sqrtPriceLimitX96", type: "uint160" }], name: "params", type: "tuple" }], name: "exactInputSingle", outputs: [{ name: "amountOut", type: "uint256" }], stateMutability: "payable", type: "function" }] as const;
+// Agni multi-hop USDC→USDT→USDY swap — exactInput over an encoded V3 path.
+const SWAP_ROUTER_EXACT_INPUT_ABI = [{ inputs: [{ components: [{ name: "path", type: "bytes" }, { name: "recipient", type: "address" }, { name: "deadline", type: "uint256" }, { name: "amountIn", type: "uint256" }, { name: "amountOutMinimum", type: "uint256" }], name: "params", type: "tuple" }], name: "exactInput", outputs: [{ name: "amountOut", type: "uint256" }], stateMutability: "payable", type: "function" }] as const;
 
 // Deterministic gradient per symbol so fallback monograms look intentional, not random.
 const ICON_GRADIENTS = [
@@ -936,6 +948,29 @@ export function SwapTab({ walletClient, isConnected, address, allXStocks, public
   const [inputBalance, setInputBalance] = useState<string | null>(null);
   const [outputBalance, setOutputBalance] = useState<string | null>(null);
   const [inputBalanceRaw, setInputBalanceRaw] = useState<bigint | null>(null);
+  // Live Fluxion-tradable xStocks (SPCXx & future listings auto-appear; dead pools hidden).
+  const [fluxTokens, setFluxTokens] = useState<SwapToken[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/strategy/tokens`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const toks: SwapToken[] = [];
+        for (const t of (data.tokens || [])) {
+          if (!t.symbol || !t.address) continue;
+          if (t.wrapper) DYNAMIC_WRAPPED[t.address.toLowerCase()] = t.wrapper.toLowerCase();
+          toks.push({ symbol: t.symbol, address: t.address, decimals: t.decimals || 18 });
+        }
+        if (!cancelled) setFluxTokens(toks);
+      } catch { /* keep catalog-only list on failure */ }
+    };
+    load();
+    const id = setInterval(load, 60_000);   // periodic resync
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
 
   // Build full token list: base tokens + remaining xStocks from JSON (skip those already in BASE_TOKENS)
   const allTokens: SwapToken[] = useMemo(() => {
@@ -952,16 +987,26 @@ export function SwapTab({ walletClient, isConnected, address, allXStocks, public
     const baseAddrs = new Set(BASE_TOKENS.map(t => t.address.toLowerCase()));
     const baseTokens: SwapToken[] = BASE_TOKENS.map(t => ({
       ...t,
-      logo: t.logo || logoByAddr.get(t.address.toLowerCase()) || logoBySymbol.get(t.symbol.toLowerCase()),
-      name: t.name || nameByAddr.get(t.address.toLowerCase()) || nameBySymbol.get(t.symbol.toLowerCase()),
+      logo: t.logo || logoByAddr.get(t.address.toLowerCase()) || logoBySymbol.get(t.symbol.toLowerCase()) || CORE_TOKEN_META[t.symbol]?.logo,
+      name: t.name || nameByAddr.get(t.address.toLowerCase()) || nameBySymbol.get(t.symbol.toLowerCase()) || CORE_TOKEN_META[t.symbol]?.name,
     }));
     const xstockTokens: SwapToken[] = allXStocks
       .filter(s => !baseAddrs.has(s.mantleAddress.toLowerCase()))
       .map(s => ({
         symbol: s.symbol, address: s.mantleAddress, decimals: 18, logo: s.logo, name: s.name,
       }));
-    return [...baseTokens, ...xstockTokens];
-  }, [allXStocks]);
+    // Live Fluxion tokens not already present (by address or symbol) — e.g. SPCXx.
+    const seenAddr = new Set<string>(Array.from(baseAddrs).concat(xstockTokens.map(t => t.address.toLowerCase())));
+    const seenSym = new Set<string>(baseTokens.concat(xstockTokens).map(t => t.symbol.toLowerCase()));
+    const fluxOnly: SwapToken[] = fluxTokens
+      .filter(t => !seenAddr.has(t.address.toLowerCase()) && !seenSym.has(t.symbol.toLowerCase()))
+      .map(t => ({
+        ...t,
+        logo: logoByAddr.get(t.address.toLowerCase()) || logoBySymbol.get(t.symbol.toLowerCase()) || CORE_TOKEN_META[t.symbol]?.logo,
+        name: nameByAddr.get(t.address.toLowerCase()) || nameBySymbol.get(t.symbol.toLowerCase()) || CORE_TOKEN_META[t.symbol]?.name,
+      }));
+    return [...baseTokens, ...xstockTokens, ...fluxOnly];
+  }, [allXStocks, fluxTokens]);
 
   const filteredTokens = useMemo(() => {
     if (!tokenSearch) return allTokens;
@@ -2268,6 +2313,32 @@ export function BridgeTab({ walletClient, onConnectWallet }: { walletClient: any
 
 
 /* ========== DASHBOARD TAB ========== */
+type PortfolioHolding = { symbol: string; amount: number; usd: number; layer: string; kind: string };
+type PortfolioData = { holdings: PortfolioHolding[]; layers: Record<string, number>; total_usd: number; invested_usd: number; ok: boolean };
+
+const LAYER_DOT: Record<string, string> = {
+  cash: "bg-white/40", usdy: "bg-emerald-500", meth: "bg-amber-500", xstocks: "bg-blue-500",
+};
+// Asset-class label per layer (group by class, NOT by issuer — "xStocks" not "Backed").
+const LAYER_CATEGORY: Record<string, string> = {
+  cash: "Cash", usdy: "USDY", meth: "mETH", xstocks: "xStocks",
+};
+const LAYER_BADGE: Record<string, string> = {
+  cash: "bg-white/5 text-white/40 border-white/10",
+  usdy: "bg-emerald-500/10 text-emerald-300 border-emerald-500/20",
+  meth: "bg-amber-500/10 text-amber-300 border-amber-500/20",
+  xstocks: "bg-blue-500/10 text-blue-300 border-blue-500/20",
+};
+// Logos + display names for the non-xStock core tokens (xStock logos/names come
+// from the live Fluxion/backed.fi metadata via `allXStocks`, resolved by symbol).
+const CORE_TOKEN_META: Record<string, { logo: string; name: string; issuer?: string }> = {
+  USDC: { logo: "/tokens/usdc.png", name: "USD Coin", issuer: "Circle" },
+  USDY: { logo: "/tokens/usdy.png", name: "US Dollar Yield", issuer: "Ondo Finance" },
+  mETH: { logo: "/tokens/meth.png", name: "Mantle Staked ETH", issuer: "Mantle" },
+  MNT: { logo: "/tokens/mnt.png", name: "Mantle" },
+  WMNT: { logo: "/tokens/mnt.png", name: "Wrapped Mantle" },
+};
+
 export function DashboardTab({
   isConnected, address, balance, portfolioSelected, selectedStrategy, strategy,
   totalAllocation, selectedCount, toggleXStock, updateAllocation, applyAiStrategy,
@@ -2281,6 +2352,24 @@ export function DashboardTab({
   aiAnalysis: string | null; aiAnalyzing: boolean; allXStocks: XStockAsset[];
   setActiveTab: (t: TabId) => void;
 }) {
+  // Real on-chain portfolio — USDC + USDY + mETH + every live xStock, valued in USD.
+  const [pf, setPf] = useState<PortfolioData | null>(null);
+  const [pfLoading, setPfLoading] = useState(false);
+  useEffect(() => {
+    if (!isConnected || !address) { setPf(null); return; }
+    let cancelled = false;
+    setPfLoading(true);
+    (async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/strategy/portfolio?wallet=${address}`);
+        const data = await res.json();
+        if (!cancelled && data?.ok) setPf(data);
+      } catch { /* leave portfolio empty on failure */ }
+      finally { if (!cancelled) setPfLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [isConnected, address]);
+
   if (!isConnected) {
     return (
       <div className="text-center py-20">
@@ -2322,19 +2411,70 @@ export function DashboardTab({
         )}
       </div>
 
-      {/* Portfolio overview */}
-      <div className="grid lg:grid-cols-3 gap-4">
-        {[
-          { label: "Portfolio Value", value: "$0.00", sub: "0 assets" },
-          { label: "Selected Assets", value: `${selectedCount}`, sub: `${totalAllocation}% allocated` },
-          { label: "Strategy", value: selectedStrategy || "None", sub: selectedStrategy ? `Risk ${strategy.risk}` : "Select from Market tab" },
-        ].map((s, i) => (
-          <div key={i} className="p-4 rounded-xl border border-white/5 bg-white/[0.02]">
-            <div className="text-[10px] text-white/40 tracking-wider">{s.label}</div>
-            <div className="text-xl font-bold text-white/90 mt-1">{s.value}</div>
-            <div className="text-[10px] text-white/30 mt-0.5">{s.sub}</div>
+      {/* Portfolio overview — real on-chain balances */}
+      {(() => {
+        const assetCount = pf?.holdings.length ?? 0;
+        const totalUsd = pf?.total_usd ?? 0;
+        return (
+          <div className="grid lg:grid-cols-3 gap-4">
+            {[
+              { label: "Portfolio Value", value: pfLoading && !pf ? "…" : `$${totalUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, sub: `${assetCount} asset${assetCount === 1 ? "" : "s"} on-chain` },
+              { label: "Selected Assets", value: `${selectedCount}`, sub: `${totalAllocation}% allocated` },
+              { label: "Strategy", value: selectedStrategy || "None", sub: selectedStrategy ? `Risk ${strategy.risk}` : "Select from Market tab" },
+            ].map((s, i) => (
+              <div key={i} className="p-4 rounded-xl border border-white/5 bg-white/[0.02]">
+                <div className="text-[10px] text-white/40 tracking-wider">{s.label}</div>
+                <div className="text-xl font-bold text-white/90 mt-1">{s.value}</div>
+                <div className="text-[10px] text-white/30 mt-0.5">{s.sub}</div>
+              </div>
+            ))}
           </div>
-        ))}
+        );
+      })()}
+
+      {/* Holdings — real wallet balances + % allocation across the 3 layers + cash */}
+      <div className="p-5 rounded-xl border border-white/5 bg-white/[0.02]">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-xs font-semibold text-white/50 tracking-wider uppercase">Holdings</h3>
+          <span className="text-[9px] text-white/30">{pfLoading ? "syncing…" : "on-chain · Mantle"}</span>
+        </div>
+        {pf && pf.holdings.length > 0 ? (
+          <div className="divide-y divide-white/5">
+            {[...pf.holdings].sort((a, b) => b.usd - a.usd).map((h) => {
+              const pct = pf.total_usd > 0 ? (h.usd / pf.total_usd) * 100 : 0;
+              const core = CORE_TOKEN_META[h.symbol];
+              const x = h.layer === "xstocks" ? allXStocks.find((s) => s.symbol === h.symbol) : undefined;
+              const logo = core?.logo || x?.logo || "";
+              const name = core?.name || x?.name || "";
+              // xStocks are grouped by asset class ("xStocks"); the issuer (Backed Finance) is a subtitle.
+              const issuer = h.layer === "xstocks" ? "Backed Finance" : core?.issuer;
+              const category = LAYER_CATEGORY[h.layer] || h.layer;
+              return (
+                <div key={`${h.symbol}-${h.layer}`} className="flex items-center justify-between py-2.5 text-[12px]">
+                  <span className="flex items-center gap-2.5 min-w-0">
+                    <TokenIcon token={{ symbol: h.symbol, logo }} size={26} />
+                    <span className="flex flex-col min-w-0">
+                      <span className="flex items-center gap-1.5">
+                        <span className="font-semibold text-white/80">{h.symbol}</span>
+                        <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full border ${LAYER_BADGE[h.layer] || "bg-white/5 text-white/40 border-white/10"}`}>{category}</span>
+                      </span>
+                      {(name || issuer) && (
+                        <span className="text-[9px] text-white/30 truncate">{[name, issuer].filter(Boolean).join(" · ")}</span>
+                      )}
+                    </span>
+                  </span>
+                  <span className="flex items-center gap-3 shrink-0">
+                    <span className="font-mono text-white/40 text-[11px]">{h.amount.toLocaleString(undefined, { maximumFractionDigits: 6 })}</span>
+                    <span className="font-mono text-white/75">${h.usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    <span className="font-mono text-white/40 w-12 text-right">{pct.toFixed(1)}%</span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-center py-6 text-xs text-white/30">{pfLoading ? "Reading balances…" : "No assets in this wallet yet. Run a strategy cycle to buy the 3 layers."}</div>
+        )}
       </div>
 
       {/* Quick actions */}
@@ -2446,17 +2586,19 @@ export function DashboardTab({
         </div>
       )}
 
-      {/* Open liquidity pools */}
-      <div className="p-5 rounded-xl border border-white/5 bg-white/[0.02]">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-xs font-semibold text-white/50 tracking-wider uppercase">Liquidity Positions</h3>
-          <button onClick={() => setActiveTab("pools")} className="text-[10px] text-blue-400 hover:text-blue-300 transition-colors">View Pools</button>
+      {/* Open liquidity pools — hidden behind POOLS_ENABLED (Builder cleanup). */}
+      {POOLS_ENABLED && (
+        <div className="p-5 rounded-xl border border-white/5 bg-white/[0.02]">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-xs font-semibold text-white/50 tracking-wider uppercase">Liquidity Positions</h3>
+            <button onClick={() => setActiveTab("pools")} className="text-[10px] text-blue-400 hover:text-blue-300 transition-colors">View Pools</button>
+          </div>
+          <div className="text-center py-6">
+            <p className="text-xs text-white/30">No open liquidity positions</p>
+            <button onClick={() => setActiveTab("pools")} className="mt-2 text-[10px] text-blue-400 hover:text-blue-300 transition-colors">Explore RWA Pools</button>
+          </div>
         </div>
-        <div className="text-center py-6">
-          <p className="text-xs text-white/30">No open liquidity positions</p>
-          <button onClick={() => setActiveTab("pools")} className="mt-2 text-[10px] text-blue-400 hover:text-blue-300 transition-colors">Explore RWA Pools</button>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -2719,6 +2861,80 @@ type AutopilotStatus = {
   decision_count: number;
 };
 
+type StrategyLeg = {
+  symbol: string;
+  layer: string;
+  token_out: string;
+  unwrap: boolean;
+  fee: number;
+  amount_usdc: string;
+  min_out: string;
+  est_usd: number;
+  price_impact_bps?: number;
+  slippage_bps?: number;
+  tradable?: boolean;
+  note?: string;
+};
+type UsdyLeg = {
+  symbol: string;
+  layer: string;
+  router: string;
+  token_in: string;
+  token_out: string;
+  path: string;
+  multihop?: boolean;
+  route?: string;
+  route_label?: string;
+  amount_usdc: string;
+  min_out: string;
+  est_usd: number;
+  quote_usdy: number;
+  price_impact_bps: number;
+  slippage_bps?: number;
+  max_impact_bps?: number;
+  capped: boolean;
+  note: string;
+};
+type StrategyPlan = {
+  regime: number;
+  regime_label: string;
+  risk_profile: string;
+  symbols: string[];
+  weights_percent: { xstocks: number; usdy: number; meth: number };
+  weights_bps: { xstocks: number; usdy: number; meth: number };
+  signals: { sentiment: number; smart_money: number; volatility: number; usdy_yield_pct: number; sources: Record<string, string> };
+  reason: string;
+  invest_usdc: number;
+  executor: string;
+  usdc: string;
+  legs: StrategyLeg[];
+  usdy_leg: UsdyLeg | null;
+  usdy_quote: (UsdyLeg & { ok: boolean }) | null;
+  usdy_usdc_held: number;
+  current_usd: { xstocks: number; meth: number };
+  total_target_usd: number;
+  deadline: number;
+};
+
+type DcaCycle = { idx: number; ts: number; regime: number; regime_label: string; weights_bps: number[]; slice_usdc: number; reason: string; tx_hash: string | null };
+type DcaStatus = {
+  active: boolean;
+  amount_usdc: number;
+  per_cycle_usdc: number;
+  risk_profile: string;
+  interval_sec: number;
+  duration_sec: number;
+  cycles_total: number;
+  cycles_done: number;
+  spent_usdc: number;
+  remaining_usdc: number;
+  next_run_ts: number | null;
+  end_ts: number | null;
+  live_swaps: boolean;
+  agent_wallet: string | null;
+  cycles: DcaCycle[];
+};
+
 function regimeMeta(regime: number): { label: string; text: string; bg: string; ring: string; dot: string } {
   switch (regime) {
     case 2: return { label: "Risk-on", text: "text-emerald-300", bg: "bg-emerald-500/10", ring: "border-emerald-500/30", dot: "#10b981" };
@@ -2729,18 +2945,40 @@ function regimeMeta(regime: number): { label: string; text: string; bg: string; 
 
 export function AutopilotTabContent() {
   const pc = mantleClient; // read-only Mantle client (independent of connected wallet chain)
+  const { address, isConnected } = useAccount();
+  const { data: walletClient } = useWalletClient();
+  // USDC funding (Task 2): connected wallet balance + chosen amount for the cycle.
+  const [usdcBalRaw, setUsdcBalRaw] = useState<bigint | null>(null);
+  const [amountInput, setAmountInput] = useState<string>("");
   const [decisions, setDecisions] = useState<AgentDecisionRow[]>([]);
   const [target, setTarget] = useState<[number, number, number] | null>(null);
   const [status, setStatus] = useState<AutopilotStatus | null>(null);
   const [backendOk, setBackendOk] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
-  const [toggling, setToggling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [selSymbols, setSelSymbols] = useState<string[]>(["AAPLx", "NVDAx", "SPYx"]);
   const [riskProfile, setRiskProfile] = useState<string>("balanced");
+  // Tradable xStock universe, synced live with Fluxion pools (falls back to a
+  // static list if the agent is unreachable).
+  const [tradable, setTradable] = useState<string[]>(XSTOCK_CHOICES);
+  // Token logos (Task 3): xStock logos from the shared metadata, core tokens local —
+  // same source the SWAP tab & portfolio use, so icons are consistent everywhere.
+  const [xLogos, setXLogos] = useState<Record<string, string>>({});
+  const legLogo = (sym: string) => CORE_TOKEN_META[sym]?.logo || xLogos[sym] || "";
   const [now, setNow] = useState<number>(Math.floor(Date.now() / 1000));
+  // Manual cycle (Task 3): analyse -> preview plan -> user signs ONE tx from own wallet.
+  const [plan, setPlan] = useState<StrategyPlan | null>(null);
+  const [planning, setPlanning] = useState(false);
+  const [executing, setExecuting] = useState(false);
+  const [execStep, setExecStep] = useState<string>("");
+  // Autopilot DCA (Task 5): time-sliced accumulation. Amount is reused from the box above.
+  const [dca, setDca] = useState<DcaStatus | null>(null);
+  const [dcaDuration, setDcaDuration] = useState<number>(24 * 3600);
+  const [dcaInterval, setDcaInterval] = useState<number>(6 * 3600);
+  const [dcaBusy, setDcaBusy] = useState(false);
+  const dcaActive = Boolean(dca?.active);
 
   // Tick for the live countdown.
   useEffect(() => {
@@ -2773,26 +3011,80 @@ export function AutopilotTabContent() {
     }
   };
 
+  const loadTradable = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/strategy/tokens`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const syms = (data.tokens || []).map((t: { symbol: string }) => t.symbol);
+      if (syms.length) setTradable(syms);
+    } catch {
+      /* keep static fallback */
+    }
+  };
+
+  useEffect(() => {
+    fetch("/xstocks-data.json")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d: { symbol: string; logo?: string }[]) => {
+        const m: Record<string, string> = {};
+        for (const a of d) if (a.symbol && a.logo) m[a.symbol] = a.logo;
+        setXLogos(m);
+      })
+      .catch(() => {});
+  }, []);
+
+  const loadUsdcBalance = async () => {
+    if (!address) { setUsdcBalRaw(null); return; }
+    try {
+      const bal = await pc.readContract({
+        address: USDC_MANTLE as `0x${string}`, abi: ERC20_BALANCE_ABI,
+        functionName: "balanceOf", args: [address as `0x${string}`],
+      }) as bigint;
+      setUsdcBalRaw(bal);
+    } catch {
+      setUsdcBalRaw(null);
+    }
+  };
+
   useEffect(() => {
     (async () => {
       setLoading(true);
-      await Promise.all([loadOnChain(), loadStatus()]);
+      await Promise.all([loadOnChain(), loadStatus(), loadTradable(), loadDca()]);
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Poll DCA progress (and refresh the on-chain feed) while a plan is running.
+  useEffect(() => {
+    if (!dcaActive) return;
+    const t = setInterval(() => { loadDca(); loadOnChain(); }, 8000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dcaActive]);
+
+  useEffect(() => { loadUsdcBalance(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [address]);
+
+  const usdcBal = usdcBalRaw === null ? null : Number(usdcBalRaw) / 1e6;
+  const amountNum = parseFloat(amountInput) || 0;
+  const amountTooHigh = usdcBal !== null && amountNum > usdcBal + 1e-9;
+  const amountValid = amountNum > 0 && !amountTooHigh;
+  const setPct = (p: number) => {
+    if (usdcBal === null) return;
+    const v = Math.floor(usdcBal * p * 1e6) / 1e6;
+    setAmountInput(v > 0 ? String(v) : "");
+  };
+
   const toggleSymbol = (sym: string) => {
-    setSelSymbols((prev) => {
-      if (prev.includes(sym)) return prev.filter((s) => s !== sym);
-      if (prev.length >= 5) return prev;
-      return [...prev, sym];
-    });
+    setSelSymbols((prev) =>
+      prev.includes(sym) ? prev.filter((s) => s !== sym) : [...prev, sym],
+    );
   };
 
   const saveConfig = async () => {
     setError(null); setNotice(null);
-    if (selSymbols.length < 3) { setError("Select between 3 and 5 xStocks."); return; }
+    if (selSymbols.length < 1) { setError("Pick at least 1 xStock for the growth layer."); return; }
     try {
       const res = await fetch(`${BACKEND_URL}/api/autopilot/config`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -2803,25 +3095,6 @@ export function AutopilotTabContent() {
       setNotice("Strategy saved.");
     } catch (e: any) {
       setError("Backend unreachable — config needs the AI agent running at " + BACKEND_URL);
-    }
-  };
-
-  const toggleMode = async () => {
-    setToggling(true); setError(null); setNotice(null);
-    try {
-      const next = !(status?.enabled);
-      const res = await fetch(`${BACKEND_URL}/api/autopilot/toggle`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: next }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setStatus(await res.json()); setBackendOk(true);
-      setNotice(next ? "Autopilot engaged — the agent will rebalance on schedule." : "Switched to Manual mode.");
-      setTimeout(loadOnChain, 1500);
-    } catch {
-      setError("Backend unreachable — Manual/Autopilot toggle needs the AI agent at " + BACKEND_URL);
-    } finally {
-      setToggling(false);
     }
   };
 
@@ -2841,7 +3114,237 @@ export function AutopilotTabContent() {
     }
   };
 
-  const enabled = Boolean(status?.enabled);
+  // Manual cycle (Task 3): the agent analyses the market for the entered amount and
+  // returns a target-weight plan; the user reviews it, then signs ONE tx that buys all
+  // three layers from their own USDC (rebalancing the portfolio toward the targets).
+  const runManual = async () => {
+    if (selSymbols.length < 1) { setError("Pick at least 1 xStock in Strategy configuration first."); return; }
+    setPlanning(true); setError(null); setNotice(null); setPlan(null);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/strategy/plan`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount_usdc: amountNum,
+          wallet_address: address ?? null,
+          risk_profile: riskProfile,
+          symbols: selSymbols,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as StrategyPlan;
+      setBackendOk(true);
+      if (!data.legs?.length && !data.usdy_leg && data.usdy_usdc_held <= 0) {
+        setError("Nothing to buy — the portfolio already matches the target weights for this amount.");
+        return;
+      }
+      setPlan(data);
+    } catch {
+      setError("Backend unreachable — analysis needs the AI agent at " + BACKEND_URL);
+    } finally {
+      setPlanning(false);
+    }
+  };
+
+  const executePlan = async () => {
+    if (!plan || !walletClient || !address) return;
+    setExecuting(true); setError(null); setNotice(null);
+    const deadline = BigInt(plan.deadline);
+    const done: string[] = [];      // executed legs (for the summary)
+    const skipped: string[] = [];   // limited / failed legs — never abort the rest
+    let repHash: `0x${string}` | null = null;   // a representative tx for the on-chain record
+
+    // Ensure the user's USDC allowance for ``spender`` covers ``needed`` (one approval).
+    const ensureAllowance = async (spender: string, needed: bigint) => {
+      const allowance = await pc.readContract({
+        address: USDC_MANTLE as `0x${string}`, abi: ERC20_ALLOWANCE_ABI,
+        functionName: "allowance", args: [address as `0x${string}`, spender as `0x${string}`],
+      }) as bigint;
+      if (allowance < needed) {
+        const aH = await walletClient.writeContract({
+          address: USDC_MANTLE as `0x${string}`, abi: ERC20_APPROVE_ABI,
+          functionName: "approve", args: [spender as `0x${string}`, MAX_UINT256],
+          chain: mantleChain, account: address as `0x${string}`,
+        });
+        await pc.waitForTransactionReceipt({ hash: aH, confirmations: 1 });
+      }
+    };
+    const isReject = (e: any) => {
+      const m = (e?.shortMessage || e?.message || "").toString();
+      return m.includes("User rejected") || m.includes("denied");
+    };
+
+    try {
+      const tradable = (l: StrategyLeg) => l.tradable !== false && BigInt(l.amount_usdc) > BigInt(0);
+      const xLegs = plan.legs.filter((l) => l.layer === "xstocks" && tradable(l));
+      const methLegs = plan.legs.filter((l) => l.layer === "meth" && tradable(l));
+      // Legs the agent couldn't quote (no pool / impact over cap) — surfaced, kept as USDC.
+      plan.legs.filter((l) => l.tradable === false)
+        .forEach((l) => skipped.push(`${l.symbol}${l.note ? ` (${l.note})` : ""}`));
+
+      // --- xStocks legs via Fluxion XStockSwapHelper.swapAndUnwrap (USDC -> wrapped -> xStock) ---
+      if (xLegs.length) {
+        const sum = xLegs.reduce((a, l) => a + BigInt(l.amount_usdc), BigInt(0));
+        setExecStep("Approve USDC for Fluxion (xStocks)…");
+        await ensureAllowance(XSTOCK_SWAP_HELPER, sum);
+        for (const l of xLegs) {
+          try {
+            setExecStep(`Awaiting signature — buying ${l.symbol} on Fluxion…`);
+            const tx = await walletClient.writeContract({
+              address: XSTOCK_SWAP_HELPER as `0x${string}`, abi: SWAP_HELPER_SWAP_AND_UNWRAP_ABI,
+              functionName: "swapAndUnwrap",
+              args: [USDC_MANTLE as `0x${string}`, l.token_out as `0x${string}`, BigInt(l.amount_usdc), l.fee, BigInt(l.min_out), deadline],
+              chain: mantleChain, account: address as `0x${string}`,
+            });
+            await pc.waitForTransactionReceipt({ hash: tx, confirmations: 1 });
+            done.push(l.symbol); repHash = repHash ?? tx;
+          } catch (e: any) {
+            if (isReject(e)) throw e;
+            skipped.push(`${l.symbol} (swap failed)`);
+          }
+        }
+      }
+
+      // --- mETH leg via Fluxion SwapRouter.exactInputSingle (USDC -> mETH) ---
+      for (const l of methLegs) {
+        try {
+          setExecStep("Approve USDC for Fluxion (mETH)…");
+          await ensureAllowance(FLUXION_ROUTER, BigInt(l.amount_usdc));
+          setExecStep("Awaiting signature — buying mETH on Fluxion…");
+          const tx = await walletClient.writeContract({
+            address: FLUXION_ROUTER as `0x${string}`, abi: SWAP_ROUTER_ABI,
+            functionName: "exactInputSingle",
+            args: [{
+              tokenIn: USDC_MANTLE as `0x${string}`, tokenOut: l.token_out as `0x${string}`,
+              fee: l.fee, recipient: address as `0x${string}`, deadline,
+              amountIn: BigInt(l.amount_usdc), amountOutMinimum: BigInt(l.min_out), sqrtPriceLimitX96: BigInt(0),
+            }],
+            chain: mantleChain, account: address as `0x${string}`,
+          });
+          await pc.waitForTransactionReceipt({ hash: tx, confirmations: 1 });
+          done.push("mETH"); repHash = repHash ?? tx;
+        } catch (e: any) {
+          if (isReject(e)) throw e;
+          skipped.push("mETH (swap failed)");
+        }
+      }
+
+      // --- USDY leg — a REAL multi-hop USDC→USDT→USDY swap on the Agni SwapRouter ---
+      let usdyHash: `0x${string}` | null = null;
+      const ul = plan.usdy_leg;
+      if (ul && BigInt(ul.amount_usdc) > BigInt(0)) {
+        try {
+          setExecStep("Approve USDC for Agni (USDY)…");
+          await ensureAllowance(AGNI_SWAP_ROUTER, BigInt(ul.amount_usdc));
+          setExecStep(`Awaiting signature — buying USDY (${ul.route_label ?? "USDC→USDT→USDY via Agni"}, ${(ul.price_impact_bps / 100).toFixed(2)}% impact)…`);
+          usdyHash = await walletClient.writeContract({
+            address: AGNI_SWAP_ROUTER as `0x${string}`, abi: SWAP_ROUTER_EXACT_INPUT_ABI,
+            functionName: "exactInput",
+            args: [{
+              path: ul.path as `0x${string}`, recipient: address as `0x${string}`, deadline,
+              amountIn: BigInt(ul.amount_usdc), amountOutMinimum: BigInt(ul.min_out),
+            }],
+            chain: mantleChain, account: address as `0x${string}`,
+          });
+          await pc.waitForTransactionReceipt({ hash: usdyHash, confirmations: 1 });
+          done.push("USDY (Agni)"); repHash = repHash ?? usdyHash;
+        } catch (e: any) {
+          if (isReject(e)) throw e;
+          skipped.push("USDY (Agni swap failed)");
+        }
+      }
+
+      if (!done.length) {
+        setError(`No legs executed.${skipped.length ? " Limited: " + skipped.join(", ") : ""}`);
+        return;
+      }
+
+      // Record the confirmed decision on-chain (best-effort) with a representative tx.
+      setExecStep("Recording decision on-chain…");
+      let recTx: string | null = null;
+      try {
+        const recRes = await fetch(`${BACKEND_URL}/api/strategy/record`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            regime: plan.regime,
+            w_stocks: plan.weights_bps.xstocks,
+            w_usdy: plan.weights_bps.usdy,
+            w_meth: plan.weights_bps.meth,
+            reason: plan.reason,
+            tx_hash: repHash,
+          }),
+        });
+        if (recRes.ok) recTx = (await recRes.json())?.tx_hash ?? null;
+      } catch { /* record is best-effort */ }
+
+      setPlan(null);
+      setAmountInput("");
+      const parts = [
+        `Bought ${done.join(", ")} (${plan.weights_percent.xstocks}/${plan.weights_percent.usdy}/${plan.weights_percent.meth}).`,
+        usdyHash && plan.usdy_leg ? `USDY swapped on Agni via ${plan.usdy_leg.route ?? "USDC→USDT→USDY"} (~${plan.usdy_leg.est_usd} USDC, ${(plan.usdy_leg.price_impact_bps / 100).toFixed(2)}% impact).` : "",
+        skipped.length ? `Limited (kept as USDC): ${skipped.join(", ")}.` : "",
+        plan.usdy_usdc_held > 0 ? `${plan.usdy_usdc_held} USDC of the USDY layer kept as cash (${plan.usdy_leg?.capped ? "thin liquidity over impact cap" : "no route to quote"}).` : "",
+        recTx ? "Decision recorded on-chain." : "",
+      ].filter(Boolean);
+      setNotice(parts.join(" ") || "Cycle complete.");
+      await Promise.all([loadOnChain(), loadStatus(), loadUsdcBalance()]);
+    } catch (e: any) {
+      const msg = (e?.shortMessage || e?.message || "").toString();
+      setError(isReject(e) ? "Transaction rejected in wallet." : `Execution failed: ${msg.slice(0, 140)}`);
+    } finally {
+      setExecuting(false); setExecStep("");
+    }
+  };
+
+  // Autopilot DCA (Task 5).
+  const loadDca = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/autopilot/dca/status`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setDca((await res.json()) as DcaStatus);
+      setBackendOk(true);
+    } catch { /* keep last */ }
+  };
+
+  const startDca = async () => {
+    setDcaBusy(true); setError(null); setNotice(null);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/autopilot/dca/start`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount_usdc: amountNum,
+          risk_profile: riskProfile,
+          duration_sec: dcaDuration,
+          interval_sec: dcaInterval,
+          symbols: selSymbols,
+        }),
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || `HTTP ${res.status}`); }
+      setDca((await res.json()) as DcaStatus);
+      setNotice("Autopilot DCA engaged — the agent will buy a tranche each interval, no further signatures needed.");
+      setTimeout(() => { loadDca(); loadOnChain(); }, 2000);
+    } catch (e: any) {
+      setError(`Could not start DCA: ${(e?.message || "").toString().slice(0, 140)}`);
+    } finally {
+      setDcaBusy(false);
+    }
+  };
+
+  const stopDca = async () => {
+    setDcaBusy(true); setError(null);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/autopilot/dca/stop`, { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setDca((await res.json()) as DcaStatus);
+      setNotice("Autopilot DCA stopped. Remaining capital is left untouched.");
+    } catch {
+      setError("Backend unreachable — could not stop DCA.");
+    } finally {
+      setDcaBusy(false);
+    }
+  };
+
+  const dcaCyclesFromInputs = dcaInterval > 0 ? Math.max(1, Math.floor(dcaDuration / dcaInterval)) : 1;
+
   const lastDecision = status?.last_decision;
   const lastTxHash: string | null = lastDecision?.tx_hash ?? null;
   const lastTxTs: number | null = lastDecision?.ts ?? null;
@@ -2854,12 +3357,13 @@ export function AutopilotTabContent() {
     { name: "mETH", value: weights[2] / 100 },
   ] : [];
 
-  let countdown = "—";
-  if (enabled && status?.next_run_ts) {
-    const secs = Math.max(0, status.next_run_ts - now);
+  const fmtCountdown = (ts: number | null | undefined): string => {
+    if (!ts) return "—";
+    const secs = Math.max(0, ts - now);
     const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = secs % 60;
-    countdown = h > 0 ? `${h}h ${m}m` : `${m}m ${s}s`;
-  }
+    return h > 0 ? `${h}h ${m}m` : `${m}m ${s}s`;
+  };
+  const countdown = fmtCountdown(dcaActive ? dca?.next_run_ts : status?.next_run_ts);
 
   return (
     <div className="max-w-5xl mx-auto px-4">
@@ -2871,26 +3375,149 @@ export function AutopilotTabContent() {
       {/* Mode bar */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5 p-4 rounded-xl border border-white/10 bg-white/[0.02]">
         <div className="flex items-center gap-3">
-          <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${enabled ? "bg-emerald-400" : "bg-white/30"}`}>
-            {enabled && <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping" />}
+          <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${dcaActive ? "bg-emerald-400" : "bg-white/30"}`}>
+            {dcaActive && <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping" />}
           </span>
           <div>
-            <div className="text-sm font-semibold text-white/90">{enabled ? "Autopilot — ON" : "Manual mode"}</div>
-            <div className="text-[10px] text-white/40">{enabled ? `Next rebalance in ${countdown}` : "Agent is idle. Toggle Autopilot or run a cycle manually."}</div>
+            <div className="text-sm font-semibold text-white/90">{dcaActive ? "Autopilot DCA — ON" : "Manual mode"}</div>
+            <div className="text-[10px] text-white/40">{dcaActive ? `Cycle ${dca?.cycles_done}/${dca?.cycles_total} · next tranche in ${countdown}` : "Agent is idle. Run a manual cycle, or engage Autopilot DCA below."}</div>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={runNow} disabled={running} className="px-3 py-2 rounded-lg text-xs font-semibold border border-white/15 bg-white/[0.04] hover:bg-white/[0.08] disabled:opacity-50">
-            {running ? "Running…" : "Run cycle now"}
+          <button onClick={(isConnected && amountValid) ? runManual : runNow} disabled={running || planning || executing || dcaActive} className="px-3 py-2 rounded-lg text-xs font-semibold border border-white/15 bg-white/[0.04] hover:bg-white/[0.08] disabled:opacity-50">
+            {planning ? "Analyzing…" : running ? "Running…" : "Run cycle now"}
           </button>
-          <button onClick={toggleMode} disabled={toggling} className={`px-4 py-2 rounded-lg text-xs font-bold transition ${enabled ? "bg-red-500/20 text-red-200 border border-red-500/30 hover:bg-red-500/30" : "bg-emerald-500/20 text-emerald-200 border border-emerald-500/30 hover:bg-emerald-500/30"} disabled:opacity-50`}>
-            {toggling ? "…" : enabled ? "Switch to Manual" : "Engage Autopilot"}
-          </button>
+          {dcaActive && (
+            <button onClick={stopDca} disabled={dcaBusy} className="px-4 py-2 rounded-lg text-xs font-bold transition bg-red-500/20 text-red-200 border border-red-500/30 hover:bg-red-500/30 disabled:opacity-50">
+              {dcaBusy ? "…" : "Stop Autopilot"}
+            </button>
+          )}
         </div>
       </div>
 
       {error && <div className="mb-4 p-3 rounded-lg border border-red-500/30 bg-red-500/10 text-[11px] text-red-200">{error}</div>}
       {notice && <div className="mb-4 p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-[11px] text-emerald-200">{notice}</div>}
+
+      {/* Investment amount (Task 2): connected wallet USDC + quick-select + custom */}
+      <div className="mb-5 p-4 rounded-xl border border-white/10 bg-white/[0.02]">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[10px] uppercase tracking-wide text-white/40">Amount to invest (USDC)</div>
+          <div className="text-[11px] text-white/50">
+            {isConnected
+              ? <>Balance: <span className="text-white/80 font-semibold">{usdcBal === null ? "…" : usdcBal.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC</span></>
+              : <span className="text-amber-300/80">Connect wallet to fund a cycle</span>}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 mb-2">
+          <div className={`flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border bg-white/[0.03] ${amountTooHigh ? "border-red-500/40" : "border-white/10"}`}>
+            <input
+              type="number" min="0" step="any" inputMode="decimal" placeholder="0.00"
+              value={amountInput} onChange={(e) => setAmountInput(e.target.value)}
+              className="flex-1 bg-transparent outline-none text-sm text-white/90 placeholder-white/25"
+            />
+            <span className="text-[11px] font-semibold text-white/40">USDC</span>
+          </div>
+          <button onClick={() => setPct(1)} disabled={usdcBal === null} className="px-3 py-2 rounded-lg text-[11px] font-bold border border-white/10 bg-white/[0.03] text-white/70 hover:bg-white/[0.07] disabled:opacity-40">Max</button>
+        </div>
+        <div className="flex items-center gap-2">
+          {[0.25, 0.5, 0.75].map((p) => (
+            <button key={p} onClick={() => setPct(p)} disabled={usdcBal === null}
+              className="flex-1 px-2 py-1.5 rounded-lg text-[11px] font-semibold border border-white/10 bg-white/[0.02] text-white/55 hover:bg-white/[0.06] disabled:opacity-40">
+              {p * 100}%
+            </button>
+          ))}
+        </div>
+        {amountTooHigh && <div className="mt-2 text-[10px] text-red-300">Amount exceeds your USDC balance.</div>}
+        <button
+          onClick={runManual}
+          disabled={!isConnected || !amountValid || planning || executing}
+          className="mt-3 w-full px-4 py-2.5 rounded-lg text-xs font-bold bg-blue-500/20 text-blue-100 border border-blue-500/30 hover:bg-blue-500/30 disabled:opacity-40 disabled:cursor-not-allowed">
+          {planning ? "Analyzing market…" : !isConnected ? "Connect wallet to invest" : !amountValid ? "Enter an amount" : `Run cycle — analyze & buy ${amountNum.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC`}
+        </button>
+        <div className="mt-2 text-[10px] text-white/35">The agent computes the target % from live signals, then you sign each layer from your own wallet — xStocks &amp; mETH via Fluxion, USDY via Agni. A leg with no pool/liquidity is skipped without blocking the others.</div>
+      </div>
+
+      {/* Manual cycle plan preview (Task 3) — sign ONE tx to buy all layers. */}
+      {plan && (() => {
+        const m = regimeMeta(plan.regime);
+        const totalBuy = plan.legs.filter((l) => l.tradable !== false).reduce((a, l) => a + l.est_usd, 0) + (plan.usdy_leg?.est_usd ?? 0);
+        const impactPct = ((plan.usdy_leg?.price_impact_bps ?? 0) / 100);
+        const impactColor = impactPct >= 2.5 ? "text-amber-300" : "text-emerald-300";
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={() => !executing && setPlan(null)}>
+            <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b0e14] shadow-2xl overflow-hidden">
+              <div className="p-5 border-b border-white/10">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-white/90">Confirm strategy purchase</h3>
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border ${m.ring} ${m.bg} ${m.text}`}>
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />{m.label}
+                  </span>
+                </div>
+                <p className="text-[11px] text-white/45 mt-2 leading-relaxed">{plan.reason}</p>
+              </div>
+              <div className="p-5 space-y-3">
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  {[["xStocks", plan.weights_percent.xstocks, "text-blue-300"], ["USDY", plan.weights_percent.usdy, "text-emerald-300"], ["mETH", plan.weights_percent.meth, "text-amber-300"]].map(([lbl, v, c]) => (
+                    <div key={lbl as string} className="p-2 rounded-lg border border-white/10 bg-white/[0.02]">
+                      <div className={`text-base font-bold ${c}`}>{v as number}%</div>
+                      <div className="text-[9px] uppercase tracking-wide text-white/40">{lbl as string}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="rounded-lg border border-white/10 bg-white/[0.02] divide-y divide-white/5">
+                  {plan.legs.map((l) => {
+                    const limited = l.tradable === false;
+                    return (
+                    <div key={l.symbol} className="flex items-center justify-between px-3 py-2 text-[11px]">
+                      <span className="flex items-center gap-2">
+                        <TokenIcon token={{ symbol: l.symbol, logo: legLogo(l.symbol) }} size={18} />
+                        {l.symbol}
+                        <span className="text-white/30">
+                          {limited
+                            ? `limited — ${l.note || "no liquidity"}`
+                            : `Fluxion · ${l.unwrap ? "swap+unwrap" : "swap"}${l.price_impact_bps ? ` · ${(l.price_impact_bps / 100).toFixed(2)}% impact` : ""}${l.slippage_bps ? ` · ${(l.slippage_bps / 100).toFixed(0)}% max slippage` : ""}`}
+                        </span>
+                      </span>
+                      <span className={`font-mono ${limited ? "text-white/30 line-through" : "text-white/75"}`}>{l.est_usd.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC</span>
+                    </div>
+                  );})}
+                  {plan.usdy_leg && (
+                    <div className="flex items-center justify-between px-3 py-2 text-[11px]">
+                      <span className="flex items-center gap-2"><TokenIcon token={{ symbol: "USDY", logo: legLogo("USDY") }} size={18} />USDY <span className="text-white/30">{plan.usdy_leg.route_label ?? "USDC→USDT→USDY via Agni"} · <span className={impactColor}>{impactPct.toFixed(2)}% impact</span>{plan.usdy_leg.slippage_bps ? ` · ${(plan.usdy_leg.slippage_bps / 100).toFixed(0)}% max slippage` : ""}</span></span>
+                      <span className="font-mono text-white/75">{plan.usdy_leg.est_usd.toLocaleString(undefined, { maximumFractionDigits: 4 })} USDC</span>
+                    </div>
+                  )}
+                  {plan.usdy_usdc_held > 0 && (
+                    <div className="flex items-center justify-between px-3 py-2 text-[11px]">
+                      <span className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-white/20" />USDY <span className="text-white/30">{plan.usdy_leg?.capped ? "thin liquidity — rest kept as USDC*" : "no route to quote — kept as USDC*"}</span></span>
+                      <span className="font-mono text-white/40">{plan.usdy_usdc_held.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC</span>
+                    </div>
+                  )}
+                </div>
+                {plan.usdy_leg && (
+                  <div className="flex items-center justify-between text-[10px] text-white/40 rounded-lg border border-emerald-500/15 bg-emerald-500/[0.04] px-3 py-2">
+                    <span>QuoterV2 ({plan.usdy_leg.route_label ?? "USDC→USDT→USDY via Agni"}) → est. receive</span>
+                    <span className="font-mono text-emerald-200/80">{plan.usdy_leg.quote_usdy.toLocaleString(undefined, { maximumFractionDigits: 6 })} USDY</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between text-[11px] text-white/50">
+                  <span>Spent on swaps now</span>
+                  <span className="font-semibold text-white/80">{totalBuy.toLocaleString(undefined, { maximumFractionDigits: 4 })} USDC</span>
+                </div>
+                {plan.usdy_usdc_held > 0 && <div className="text-[9px] text-white/30 leading-relaxed">* Soft {((plan.usdy_leg?.max_impact_bps ?? 800) / 100).toFixed(0)}% impact cap — the USDY leg is filled up to that impact via the USDC→USDT→USDY route; whatever the thin pool can&apos;t absorb within the cap stays as USDC. USDC is only fully held back when the route can&apos;t be quoted at all.</div>}
+                <div className="text-[9px] text-white/30 leading-relaxed">The USDY leg routes USDC→USDT→USDY on Agni (real liquidity lives in the USDY/USDT pool); the impact &amp; max-slippage shown above are the honest execution cost.</div>
+                {execStep && <div className="text-[11px] text-blue-200 flex items-center gap-2"><span className="w-3 h-3 rounded-full border-2 border-blue-300/40 border-t-blue-300 animate-spin" />{execStep}</div>}
+                <div className="flex items-center gap-2 pt-1">
+                  <button onClick={() => setPlan(null)} disabled={executing} className="flex-1 px-4 py-2.5 rounded-lg text-xs font-semibold border border-white/10 bg-white/[0.03] text-white/60 hover:bg-white/[0.07] disabled:opacity-40">Cancel</button>
+                  <button onClick={executePlan} disabled={executing} className="flex-1 px-4 py-2.5 rounded-lg text-xs font-bold bg-emerald-500/25 text-emerald-100 border border-emerald-500/40 hover:bg-emerald-500/35 disabled:opacity-50">
+                    {executing ? "Working…" : "Approve & Sign all legs"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Top grid: regime + target donut + layers */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-4 mb-5">
@@ -2940,9 +3567,12 @@ export function AutopilotTabContent() {
           <div className="text-[10px] uppercase tracking-wide text-white/40">Strategy configuration</div>
           {!backendOk && <span className="text-[9px] text-amber-300/80">backend offline · read-only</span>}
         </div>
-        <div className="text-[11px] text-white/50 mb-2">Pick 3–5 xStocks for the growth layer ({selSymbols.length}/5)</div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-[11px] text-white/50">Pick 1 or more xStocks for the growth layer ({selSymbols.length}/{tradable.length})</div>
+          <span className="text-[9px] text-white/30">{tradable.length} tradable · synced with Fluxion</span>
+        </div>
         <div className="flex flex-wrap gap-2 mb-4">
-          {XSTOCK_CHOICES.map((sym) => {
+          {tradable.map((sym) => {
             const on = selSymbols.includes(sym);
             return (
               <button key={sym} onClick={() => toggleSymbol(sym)} className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition ${on ? "border-blue-500/40 bg-blue-500/15 text-blue-200" : "border-white/10 bg-white/[0.02] text-white/50 hover:bg-white/[0.05]"}`}>
@@ -2962,6 +3592,73 @@ export function AutopilotTabContent() {
         </div>
         {lastDecision?.simulated && (
           <div className="mt-3 text-[10px] text-amber-300/80">Swaps run in <b>simulation</b> (agent wallet holds no portfolio assets). On-chain <code>recordDecision</code> is real. Fund the wallet and set <code>AUTOPILOT_LIVE_SWAPS=1</code> for live trades.</div>
+        )}
+      </div>
+
+      {/* Autopilot DCA (Task 5) — time-sliced accumulation */}
+      <div className="mb-5 p-4 rounded-xl border border-white/10 bg-white/[0.02]">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[10px] uppercase tracking-wide text-white/40">Autopilot DCA — accumulate over time</div>
+          {dcaActive && <span className="text-[9px] text-emerald-300/80">running · autonomous</span>}
+        </div>
+
+        {dcaActive && dca ? (
+          <div className="space-y-3">
+            <div className="h-2 rounded-full bg-white/[0.06] overflow-hidden">
+              <div className="h-full bg-emerald-500/70 transition-all" style={{ width: `${dca.cycles_total ? (dca.cycles_done / dca.cycles_total) * 100 : 0}%` }} />
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+              <div className="p-2 rounded-lg border border-white/10 bg-white/[0.02]"><div className="text-base font-bold text-white/90">{dca.cycles_done}/{dca.cycles_total}</div><div className="text-[9px] uppercase tracking-wide text-white/40">cycles</div></div>
+              <div className="p-2 rounded-lg border border-white/10 bg-white/[0.02]"><div className="text-base font-bold text-white/90">{dca.spent_usdc}</div><div className="text-[9px] uppercase tracking-wide text-white/40">spent USDC</div></div>
+              <div className="p-2 rounded-lg border border-white/10 bg-white/[0.02]"><div className="text-base font-bold text-white/90">{dca.remaining_usdc}</div><div className="text-[9px] uppercase tracking-wide text-white/40">left USDC</div></div>
+              <div className="p-2 rounded-lg border border-white/10 bg-white/[0.02]"><div className="text-base font-bold text-white/90">{countdown}</div><div className="text-[9px] uppercase tracking-wide text-white/40">next tranche</div></div>
+            </div>
+            <div className="text-[10px] text-white/40">{dca.per_cycle_usdc} USDC per cycle · {dca.risk_profile} · pre-approved via agent-vault deposit (no per-cycle signature).</div>
+            {dca.cycles.length > 0 && (
+              <div className="rounded-lg border border-white/10 bg-white/[0.02] divide-y divide-white/5 max-h-44 overflow-auto">
+                {dca.cycles.map((c) => { const m = regimeMeta(c.regime); return (
+                  <div key={c.idx} className="flex items-center gap-2 px-3 py-2 text-[11px]">
+                    <span className="text-white/40 font-mono">#{c.idx}</span>
+                    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${m.ring} ${m.bg} ${m.text}`}>{m.label}</span>
+                    <span className="font-mono text-white/60">{(c.weights_bps[0] / 100).toFixed(0)}/{(c.weights_bps[1] / 100).toFixed(0)}/{(c.weights_bps[2] / 100).toFixed(0)}</span>
+                    <span className="text-white/40">${c.slice_usdc}</span>
+                    {c.tx_hash && <a href={`https://mantlescan.xyz/tx/${c.tx_hash}`} target="_blank" rel="noreferrer" className="ml-auto text-blue-300/80 hover:text-blue-200 font-mono">{c.tx_hash.slice(0, 8)}…</a>}
+                  </div>
+                ); })}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <div className="text-[11px] text-white/50 mb-1.5">Duration</div>
+              <div className="flex flex-wrap gap-2">
+                {[["1h", 3600], ["6h", 6 * 3600], ["24h", 24 * 3600], ["7d", 7 * 24 * 3600]].map(([lbl, v]) => (
+                  <button key={lbl as string} onClick={() => setDcaDuration(v as number)} className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition ${dcaDuration === v ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-200" : "border-white/10 bg-white/[0.02] text-white/50 hover:bg-white/[0.05]"}`}>{lbl as string}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] text-white/50 mb-1.5">Interval (buy every)</div>
+              <div className="flex flex-wrap gap-2">
+                {[["5m", 300], ["1h", 3600], ["6h", 6 * 3600], ["12h", 12 * 3600]].map(([lbl, v]) => (
+                  <button key={lbl as string} onClick={() => setDcaInterval(v as number)} className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition ${dcaInterval === v ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-200" : "border-white/10 bg-white/[0.02] text-white/50 hover:bg-white/[0.05]"}`}>{lbl as string}</button>
+                ))}
+              </div>
+            </div>
+            <div className="text-[11px] text-white/55 p-2.5 rounded-lg border border-white/10 bg-white/[0.02]">
+              {amountValid
+                ? <>Splits <b className="text-white/80">{amountNum.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC</b> into <b className="text-white/80">{dcaCyclesFromInputs}</b> tranches of ~<b className="text-white/80">{(amountNum / dcaCyclesFromInputs).toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC</b>, bought autonomously at each interval.</>
+                : <>Enter an amount above to schedule a DCA plan.</>}
+            </div>
+            <button
+              onClick={startDca}
+              disabled={!amountValid || dcaBusy}
+              className="w-full px-4 py-2.5 rounded-lg text-xs font-bold bg-emerald-500/20 text-emerald-100 border border-emerald-500/30 hover:bg-emerald-500/30 disabled:opacity-40 disabled:cursor-not-allowed">
+              {dcaBusy ? "Engaging…" : "Engage Autopilot DCA"}
+            </button>
+            <div className="text-[9px] text-white/30 leading-relaxed">Pre-approval model: the plan runs from the agent-vault wallet funded by a one-time USDC deposit, so the scheduled tranches execute with <b>no further signatures</b>. Each cycle is recorded on-chain and appears in Decision History.</div>
+          </div>
         )}
       </div>
 
