@@ -2997,13 +2997,17 @@ type StrategyLeg = {
   tradable?: boolean;
   note?: string;
 };
+type RelayStep = { id: string; to: string; data: string; value: string; chainId: number };
+type UsdyFees = { relay_usd?: number; app_usd?: number; swap_usd?: number; execution_usd?: number; gas_usd?: number };
+type UsdyRouteSummary = { ok: boolean; exec_usdc: number; quote_usdy: number; price_impact_bps: number; note?: string };
 type UsdyLeg = {
   symbol: string;
   layer: string;
+  route_kind?: "relay" | "agni";
   router: string;
   token_in: string;
   token_out: string;
-  path: string;
+  path?: string;
   multihop?: boolean;
   route?: string;
   route_label?: string;
@@ -3015,7 +3019,32 @@ type UsdyLeg = {
   slippage_bps?: number;
   max_impact_bps?: number;
   capped: boolean;
+  // Relay execution payload (present when route_kind === "relay")
+  steps?: RelayStep[];
+  request_id?: string;
+  check_endpoint?: string;
+  fees?: UsdyFees;
+  routes?: { relay?: UsdyRouteSummary; agni?: UsdyRouteSummary };
+  chosen_reason?: string;
   note: string;
+};
+// Shape returned by /api/strategy/usdy_quote (routing.best_usdy_buy) — fetched
+// fresh right before signing. Uses backend key names (exec_usdc/amount_in_wei).
+type UsdyQuoteResp = {
+  ok: boolean;
+  route_kind?: "relay" | "agni";
+  route_label?: string;
+  exec_usdc: number;
+  amount_in_wei: string;
+  min_out: string;
+  quote_usdy: number;
+  price_impact_bps: number;
+  slippage_bps?: number;
+  path?: string;
+  steps?: RelayStep[];
+  request_id?: string;
+  check_endpoint?: string;
+  fees?: UsdyFees;
 };
 type StrategyPlan = {
   regime: number;
@@ -3277,6 +3306,24 @@ export function AutopilotTabContent() {
     }
   };
 
+  // Poll Relay intent fulfilment (success/failure/refund). The same-chain swap
+  // tx already delivers the USDY, so a timeout is non-fatal — the on-chain
+  // receipt is the source of truth — but we wait to surface a clean status.
+  const pollRelayStatus = async (requestId: string) => {
+    for (let i = 0; i < 20; i++) {
+      try {
+        const r = await fetch(`${BACKEND_URL}/api/strategy/relay_status?request_id=${requestId}`);
+        if (r.ok) {
+          const s = (await r.json())?.status as string | undefined;
+          if (s === "success") return "success";
+          if (s === "failure" || s === "refund") return s;
+        }
+      } catch { /* keep polling */ }
+      await new Promise((res) => setTimeout(res, 3000));
+    }
+    return "timeout";
+  };
+
   const executePlan = async () => {
     if (!plan || !walletClient || !address) return;
     setExecuting(true); setError(null); setNotice(null);
@@ -3360,28 +3407,81 @@ export function AutopilotTabContent() {
         }
       }
 
-      // --- USDY leg — a REAL multi-hop USDC→USDT→USDY swap on the Agni SwapRouter ---
+      // --- USDY leg — best route: Relay (primary) or Agni multi-hop (fallback) ---
+      // Re-quote fresh right before signing so the calldata/route is current.
       let usdyHash: `0x${string}` | null = null;
-      const ul = plan.usdy_leg;
-      if (ul && BigInt(ul.amount_usdc) > BigInt(0)) {
+      let usdyRouteUsed: string | null = null;
+      const planLeg = plan.usdy_leg;
+      if (planLeg && BigInt(planLeg.amount_usdc) > BigInt(0)) {
+        let ul: UsdyLeg = planLeg;
         try {
-          setExecStep("Approve USDC for Agni (USDY)…");
-          await ensureAllowance(AGNI_SWAP_ROUTER, BigInt(ul.amount_usdc));
-          setExecStep(`Awaiting signature — buying USDY (${ul.route_label ?? "USDC→USDT→USDY via Agni"}, ${(ul.price_impact_bps / 100).toFixed(2)}% impact)…`);
-          usdyHash = await walletClient.writeContract({
-            address: AGNI_SWAP_ROUTER as `0x${string}`, abi: SWAP_ROUTER_EXACT_INPUT_ABI,
-            functionName: "exactInput",
-            args: [{
-              path: ul.path as `0x${string}`, recipient: address as `0x${string}`, deadline,
-              amountIn: BigInt(ul.amount_usdc), amountOutMinimum: BigInt(ul.min_out),
-            }],
-            chain: mantleChain, account: address as `0x${string}`,
-          });
-          await pc.waitForTransactionReceipt({ hash: usdyHash, confirmations: 1 });
-          done.push("USDY (Agni)"); repHash = repHash ?? usdyHash;
+          const fr = await fetch(`${BACKEND_URL}/api/strategy/usdy_quote?side=buy&amount_usdc=${planLeg.est_usd}&wallet=${address}`);
+          if (fr.ok) {
+            const f = (await fr.json()) as UsdyQuoteResp;
+            if (f?.ok && Number(f.exec_usdc ?? 0) > 0) {
+              // Map the backend quote keys onto the leg shape the executor reads.
+              ul = {
+                ...planLeg,
+                route_kind: f.route_kind,
+                route_label: f.route_label ?? planLeg.route_label,
+                amount_usdc: f.amount_in_wei,
+                min_out: f.min_out,
+                est_usd: f.exec_usdc,
+                quote_usdy: f.quote_usdy,
+                price_impact_bps: f.price_impact_bps,
+                slippage_bps: f.slippage_bps ?? planLeg.slippage_bps,
+                path: f.path,
+                steps: f.steps,
+                request_id: f.request_id,
+                check_endpoint: f.check_endpoint,
+                fees: f.fees,
+              };
+            }
+          }
+        } catch { /* fall back to the plan's quote */ }
+
+        try {
+          if (ul.route_kind === "relay" && ul.steps && ul.steps.length) {
+            // Relay: sign each step (approve -> swap) verbatim, then poll fulfilment.
+            for (const st of ul.steps) {
+              setExecStep(st.id === "swap"
+                ? `Awaiting signature — buying USDY (${ul.route_label ?? "via Relay"}, ${(ul.price_impact_bps / 100).toFixed(2)}% impact)…`
+                : "Approve USDC for Relay (USDY)…");
+              const h = await walletClient.sendTransaction({
+                to: st.to as `0x${string}`,
+                data: st.data as `0x${string}`,
+                value: BigInt(st.value || "0"),
+                chain: mantleChain, account: address as `0x${string}`,
+              });
+              await pc.waitForTransactionReceipt({ hash: h, confirmations: 1 });
+              if (st.id === "swap") usdyHash = h;
+            }
+            if (ul.request_id) {
+              setExecStep("Confirming USDY fill on Relay…");
+              await pollRelayStatus(ul.request_id);
+            }
+            usdyRouteUsed = "Relay";
+            done.push("USDY (Relay)"); repHash = repHash ?? usdyHash;
+          } else if (ul.path) {
+            // Agni multi-hop fallback: USDC→USDT→USDY exactInput(path).
+            setExecStep("Approve USDC for Agni (USDY)…");
+            await ensureAllowance(AGNI_SWAP_ROUTER, BigInt(ul.amount_usdc));
+            setExecStep(`Awaiting signature — buying USDY (${ul.route_label ?? "USDC→USDT→USDY via Agni"}, ${(ul.price_impact_bps / 100).toFixed(2)}% impact)…`);
+            usdyHash = await walletClient.writeContract({
+              address: AGNI_SWAP_ROUTER as `0x${string}`, abi: SWAP_ROUTER_EXACT_INPUT_ABI,
+              functionName: "exactInput",
+              args: [{
+                path: ul.path as `0x${string}`, recipient: address as `0x${string}`, deadline,
+                amountIn: BigInt(ul.amount_usdc), amountOutMinimum: BigInt(ul.min_out),
+              }],
+              chain: mantleChain, account: address as `0x${string}`,
+            });
+            await pc.waitForTransactionReceipt({ hash: usdyHash, confirmations: 1 });
+            usdyRouteUsed = "Agni"; done.push("USDY (Agni)"); repHash = repHash ?? usdyHash;
+          }
         } catch (e: any) {
           if (isReject(e)) throw e;
-          skipped.push("USDY (Agni swap failed)");
+          skipped.push(`USDY (${ul.route_kind === "relay" ? "Relay" : "Agni"} swap failed)`);
         }
       }
 
@@ -3412,7 +3512,7 @@ export function AutopilotTabContent() {
       setAmountInput("");
       const parts = [
         `Bought ${done.join(", ")} (${plan.weights_percent.xstocks}/${plan.weights_percent.usdy}/${plan.weights_percent.meth}).`,
-        usdyHash && plan.usdy_leg ? `USDY swapped on Agni via ${plan.usdy_leg.route ?? "USDC→USDT→USDY"} (~${plan.usdy_leg.est_usd} USDC, ${(plan.usdy_leg.price_impact_bps / 100).toFixed(2)}% impact).` : "",
+        usdyHash && plan.usdy_leg ? `USDY bought via ${usdyRouteUsed ?? "best route"} (${plan.usdy_leg.route_label ?? "USDC→USDT→USDY"}, ~${plan.usdy_leg.est_usd} USDC, ${(plan.usdy_leg.price_impact_bps / 100).toFixed(2)}% impact).` : "",
         skipped.length ? `Limited (kept as USDC): ${skipped.join(", ")}.` : "",
         plan.usdy_usdc_held > 0 ? `${plan.usdy_usdc_held} USDC of the USDY layer kept as cash (${plan.usdy_leg?.capped ? "thin liquidity over impact cap" : "no route to quote"}).` : "",
         recTx ? "Decision recorded on-chain." : "",
@@ -3642,7 +3742,7 @@ export function AutopilotTabContent() {
                   );})}
                   {plan.usdy_leg && (
                     <div className="flex items-center justify-between px-3 py-2 text-[11px]">
-                      <span className="flex items-center gap-2"><TokenIcon token={{ symbol: "USDY", logo: legLogo("USDY") }} size={18} />USDY <span className="text-white/30">{plan.usdy_leg.route_label ?? "USDC→USDT→USDY via Agni"} · <span className={impactColor}>{impactPct.toFixed(2)}% impact</span>{plan.usdy_leg.slippage_bps ? ` · ${(plan.usdy_leg.slippage_bps / 100).toFixed(0)}% max slippage` : ""}</span></span>
+                      <span className="flex items-center gap-2"><TokenIcon token={{ symbol: "USDY", logo: legLogo("USDY") }} size={18} />USDY <span className="text-white/30"><span className={`mr-1 px-1 rounded ${plan.usdy_leg.route_kind === "relay" ? "bg-blue-500/20 text-blue-200/80" : "bg-white/10 text-white/50"}`}>{plan.usdy_leg.route_kind === "relay" ? "Relay" : "Agni"}</span>{plan.usdy_leg.route_label ?? "USDC→USDT→USDY via Agni"} · <span className={impactColor}>{impactPct.toFixed(2)}% impact</span>{plan.usdy_leg.slippage_bps ? ` · ${(plan.usdy_leg.slippage_bps / 100).toFixed(0)}% max slippage` : ""}</span></span>
                       <span className="font-mono text-white/75">{plan.usdy_leg.est_usd.toLocaleString(undefined, { maximumFractionDigits: 4 })} USDC</span>
                     </div>
                   )}
@@ -3655,8 +3755,20 @@ export function AutopilotTabContent() {
                 </div>
                 {plan.usdy_leg && (
                   <div className="flex items-center justify-between text-[10px] text-white/40 rounded-lg border border-emerald-500/15 bg-emerald-500/[0.04] px-3 py-2">
-                    <span>QuoterV2 ({plan.usdy_leg.route_label ?? "USDC→USDT→USDY via Agni"}) → est. receive</span>
+                    <span>{plan.usdy_leg.route_kind === "relay" ? "Relay" : "QuoterV2"} ({plan.usdy_leg.route_label ?? "USDC→USDT→USDY via Agni"}) → est. receive</span>
                     <span className="font-mono text-emerald-200/80">{plan.usdy_leg.quote_usdy.toLocaleString(undefined, { maximumFractionDigits: 6 })} USDY</span>
+                  </div>
+                )}
+                {plan.usdy_leg?.route_kind === "relay" && plan.usdy_leg.fees && (
+                  <div className="flex items-center justify-between text-[10px] text-white/35 px-3">
+                    <span>Relay fees</span>
+                    <span className="font-mono">relay ${ (plan.usdy_leg.fees.relay_usd ?? 0).toFixed(4) } · swap ${ (plan.usdy_leg.fees.swap_usd ?? 0).toFixed(4) } · gas ${ (plan.usdy_leg.fees.gas_usd ?? 0).toFixed(4) }</span>
+                  </div>
+                )}
+                {plan.usdy_leg?.routes?.relay?.ok && plan.usdy_leg?.routes?.agni?.ok && (
+                  <div className="flex items-center justify-between text-[9px] text-white/25 px-3">
+                    <span>Best route</span>
+                    <span className="font-mono">Relay {plan.usdy_leg.routes.relay.quote_usdy.toFixed(5)} vs Agni {plan.usdy_leg.routes.agni.quote_usdy.toFixed(5)} USDY → {plan.usdy_leg.route_kind === "relay" ? "Relay" : "Agni"}</span>
                   </div>
                 )}
                 <div className="flex items-center justify-between text-[11px] text-white/50">
@@ -3664,7 +3776,7 @@ export function AutopilotTabContent() {
                   <span className="font-semibold text-white/80">{totalBuy.toLocaleString(undefined, { maximumFractionDigits: 4 })} USDC</span>
                 </div>
                 {plan.usdy_usdc_held > 0 && <div className="text-[9px] text-white/30 leading-relaxed">* Soft {((plan.usdy_leg?.max_impact_bps ?? 800) / 100).toFixed(0)}% impact cap — the USDY leg is filled up to that impact via the USDC→USDT→USDY route; whatever the thin pool can&apos;t absorb within the cap stays as USDC. USDC is only fully held back when the route can&apos;t be quoted at all.</div>}
-                <div className="text-[9px] text-white/30 leading-relaxed">The USDY leg routes USDC→USDT→USDY on Agni (real liquidity lives in the USDY/USDT pool); the impact &amp; max-slippage shown above are the honest execution cost.</div>
+                <div className="text-[9px] text-white/30 leading-relaxed">The USDY leg is routed via Relay (meta-aggregator / solver network) as the primary route, with Agni multi-hop USDC→USDT→USDY as the fallback; the better USDY-per-USDC quote is chosen and the impact, fees &amp; max-slippage shown above are the honest execution cost.</div>
                 {execStep && <div className="text-[11px] text-blue-200 flex items-center gap-2"><span className="w-3 h-3 rounded-full border-2 border-blue-300/40 border-t-blue-300 animate-spin" />{execStep}</div>}
                 <div className="flex items-center gap-2 pt-1">
                   <button onClick={() => setPlan(null)} disabled={executing} className="flex-1 px-4 py-2.5 rounded-lg text-xs font-semibold border border-white/10 bg-white/[0.03] text-white/60 hover:bg-white/[0.07] disabled:opacity-40">Cancel</button>
