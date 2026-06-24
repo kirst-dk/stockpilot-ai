@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { TrendingUp, TrendingDown } from "lucide-react";
-import { fetchStockQuotes, REFERENCE_QUOTES, type StockQuote } from "@/lib/marketPrices";
+import { useLiveQuotes, REFERENCE_QUOTES, type StockQuote } from "@/lib/marketPrices";
+
+const TICKER_SYMBOLS = REFERENCE_QUOTES.map((q) => q.symbol);
 
 function QuoteItem({ q }: { q: StockQuote }) {
   const up = q.change >= 0;
@@ -23,13 +24,8 @@ function QuoteItem({ q }: { q: StockQuote }) {
 
 /** Horizontal auto-scrolling xStock price ticker (stock tickers, not crypto). */
 export function Ticker() {
-  const [quotes, setQuotes] = useState<StockQuote[]>(REFERENCE_QUOTES);
-
-  useEffect(() => {
-    let alive = true;
-    fetchStockQuotes().then((q) => { if (alive && q.length) setQuotes(q); }).catch(() => {});
-    return () => { alive = false; };
-  }, []);
+  const { quotes: live } = useLiveQuotes(TICKER_SYMBOLS);
+  const quotes: StockQuote[] = REFERENCE_QUOTES.map((q) => ({ ...q, ...(live[q.symbol] ?? {}) }));
 
   const row = [...quotes, ...quotes]; // duplicate for seamless loop
   return (

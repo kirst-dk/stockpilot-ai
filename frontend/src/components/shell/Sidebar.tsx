@@ -4,13 +4,15 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, LineChart, ArrowLeftRight, Waypoints,
-  PieChart, Target, GraduationCap, X,
+  PieChart, Target, GraduationCap, Droplets, X,
 } from "lucide-react";
+import { POOLS_ENABLED } from "@/lib/flags";
 
 export const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/market", label: "Market", icon: LineChart },
   { href: "/swap", label: "Swap", icon: ArrowLeftRight },
+  ...(POOLS_ENABLED ? [{ href: "/pools", label: "Liquidity Pools", icon: Droplets }] : []),
   { href: "/bridge", label: "Bridge", icon: Waypoints },
   { href: "/portfolio", label: "Builder", icon: PieChart },
   { href: "/strategies", label: "Strategies", icon: Target },
