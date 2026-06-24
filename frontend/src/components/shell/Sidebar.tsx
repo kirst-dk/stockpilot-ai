@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, LineChart, ArrowLeftRight, Waypoints,
-  PieChart, Target, GraduationCap, Droplets, X,
+  PieChart, Target, GraduationCap, Droplets, ShieldCheck, X,
 } from "lucide-react";
 import { POOLS_ENABLED } from "@/lib/flags";
 
@@ -17,6 +17,7 @@ export const NAV_ITEMS = [
   { href: "/portfolio", label: "Builder", icon: PieChart },
   { href: "/strategies", label: "Strategies", icon: Target },
   { href: "/education", label: "Education", icon: GraduationCap },
+  { href: "/compliance", label: "Compliance", icon: ShieldCheck },
 ] as const;
 
 export function BrandMark({ className = "" }: { className?: string }) {
