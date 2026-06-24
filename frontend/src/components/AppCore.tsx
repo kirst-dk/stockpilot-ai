@@ -3693,7 +3693,7 @@ export function AutopilotTabContent() {
           className="mt-3 w-full px-4 py-2.5 rounded-lg text-xs font-bold bg-blue-500/20 text-blue-100 border border-blue-500/30 hover:bg-blue-500/30 disabled:opacity-40 disabled:cursor-not-allowed">
           {planning ? "Analyzing market…" : !isConnected ? "Connect wallet to invest" : !amountValid ? "Enter an amount" : `Run cycle — analyze & buy ${amountNum.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC`}
         </button>
-        <div className="mt-2 text-[10px] text-white/35">The agent computes the target % from live signals, then you sign each layer from your own wallet — xStocks &amp; mETH via Fluxion, USDY via Agni. A leg with no pool/liquidity is skipped without blocking the others.</div>
+        <div className="mt-2 text-[10px] text-white/35">The agent computes the target % from live signals, then you sign each layer from your own wallet — xStocks &amp; mETH via Fluxion, USDY via Relay (with Agni multi-hop as fallback). A leg with no pool/liquidity is skipped without blocking the others.</div>
       </div>
 
       {/* Manual cycle plan preview (Task 3) — sign ONE tx to buy all layers. */}
