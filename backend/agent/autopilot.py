@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import statistics
 import time
 from dataclasses import dataclass, field, asdict
@@ -34,6 +35,8 @@ from strategies.rwa_balanced import (
     fetch_portfolio_sentiment,
     _read_usdy_yield,
 )
+from agent.portfolio_reader import read_agent_portfolio
+from agent.swap_executor import execute_rebalance_swaps
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +58,11 @@ LIVE_SWAPS = os.getenv("AUTOPILOT_LIVE_SWAPS", "0") == "1"
 
 # Nansen smart-money proxy (key-stripping reverse proxy the frontend already uses).
 NANSEN_BASE_URL = os.getenv("NANSEN_BASE_URL", "https://app.stockpilotai.xyz/api/nansen")
+
+# AltLayer LLM ("AltLLM") — OpenAI-compatible gateway used as the agent's reasoning
+# brain and a sentiment fallback. Routed through the same key-stripping nginx proxy.
+ALTLLM_BASE_URL = os.getenv("ALTLLM_BASE_URL", "https://app.stockpilotai.xyz/api/altllm")
+ALTLLM_MODEL = os.getenv("ALTLLM_MODEL", "altllm-standard")
 
 # Notional portfolio value (USD) used to size the simulated rebalance when the agent
 # wallet is unfunded, so the activity feed shows realistic swap amounts.
@@ -96,20 +104,45 @@ class Regime(IntEnum):
 
 REGIME_LABELS = {Regime.RISK_OFF: "risk-off", Regime.NEUTRAL: "neutral", Regime.RISK_ON: "risk-on"}
 
-# Regime -> layer weights in basis points (xStocks, USDY, mETH). Must sum to 10000 and
-# stay within the contract guardrails (<=7000 per layer; USDY>=5000 in risk-off).
-REGIME_WEIGHTS_BPS = {
-    Regime.RISK_ON: (5500, 2000, 2500),
-    Regime.NEUTRAL: (4000, 4000, 2000),
-    Regime.RISK_OFF: (2000, 6500, 1500),
+# Risk-profile -> regime -> layer weights in basis points (xStocks, USDY, mETH).
+# Each row sums to 10000 and stays within the contract guardrails (<=7500 per layer;
+# USDY>=5000 in risk-off). The profile shifts the target mix within every regime, so
+# Conservative leans into USDY treasuries while Aggressive leans into xStocks growth.
+PROFILE_REGIME_WEIGHTS_BPS = {
+    "conservative": {
+        Regime.RISK_ON:  (4000, 4000, 2000),
+        Regime.NEUTRAL:  (2500, 5500, 2000),
+        Regime.RISK_OFF: (1000, 7500, 1500),
+    },
+    "balanced": {
+        Regime.RISK_ON:  (5000, 2500, 2500),
+        Regime.NEUTRAL:  (4000, 4000, 2000),
+        Regime.RISK_OFF: (2000, 6500, 1500),
+    },
+    "aggressive": {
+        Regime.RISK_ON:  (5500, 2000, 2500),
+        Regime.NEUTRAL:  (4500, 3500, 2000),
+        Regime.RISK_OFF: (2500, 5500, 2000),
+    },
 }
+
+
+def regime_weights_bps(regime: Regime, risk_profile: str) -> tuple[int, int, int]:
+    """Layer weights (bps) for a regime under a risk profile (defaults to balanced)."""
+    table = PROFILE_REGIME_WEIGHTS_BPS.get(risk_profile, PROFILE_REGIME_WEIGHTS_BPS["balanced"])
+    return table[regime]
+
+
+# Backward-compatible alias (balanced profile) for callers that don't pass a profile.
+REGIME_WEIGHTS_BPS = PROFILE_REGIME_WEIGHTS_BPS["balanced"]
 
 # Risk profile shifts the regime thresholds. Conservative leans defensive; aggressive
 # reaches for risk-on sooner.
+# Thresholds are on the normalized composite score in [-1, 1] (see classify_regime).
 RISK_PROFILES = {
-    "conservative": {"on": 0.50, "off": 0.05, "vol_off": 0.60},
-    "balanced": {"on": 0.35, "off": -0.20, "vol_off": 0.70},
-    "aggressive": {"on": 0.15, "off": -0.40, "vol_off": 0.80},
+    "conservative": {"on": 0.35, "off": 0.00, "vol_off": 0.62},
+    "balanced": {"on": 0.18, "off": -0.18, "vol_off": 0.72},
+    "aggressive": {"on": 0.05, "off": -0.35, "vol_off": 0.82},
 }
 
 DEFAULT_SYMBOLS = ["AAPLx", "NVDAx", "SPYx"]
@@ -138,68 +171,181 @@ class DecisionRecord:
     swaps: list             # planned swaps (simulated or executed)
     tx_hash: Optional[str]
     simulated: bool
+    portfolio: Optional[dict] = None  # real on-chain holdings snapshot (live cycles)
 
 
 # --- Signal gathering ---
 
-async def _fetch_smart_money_flow(symbols: list[str]) -> tuple[float, bool]:
-    """Best-effort Nansen smart-money net-flow signal in [-1, 1].
+async def _nansen_post(path: str, body: dict) -> Optional[list]:
+    """POST to the key-stripping Nansen proxy (same one the frontend uses).
 
-    Uses the same key-stripping proxy the frontend talks to. Any failure returns
-    ``(0.0, False)`` (neutral fallback) so the cycle is never blocked.
+    The proxy mounts the upstream Nansen API under ``/api/v1/...``; the frontend
+    therefore calls ``{NANSEN_BASE}/api/v1/...`` with a JSON body. Returns the
+    ``data`` rows, or None on any failure (so the cycle never blocks).
     """
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get(f"{NANSEN_BASE_URL}/smart-money/netflows", params={"chain": "mantle"})
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            resp = await client.post(f"{NANSEN_BASE_URL}{path}", json=body)
             resp.raise_for_status()
             data = resp.json()
-            rows = data.get("data") or data.get("result") or []
-            inflow = sum(float(r.get("inflowUsd", r.get("inflow", 0)) or 0) for r in rows)
-            outflow = sum(float(r.get("outflowUsd", r.get("outflow", 0)) or 0) for r in rows)
-            total = inflow + outflow
-            if total <= 0:
-                return 0.0, False
-            net = (inflow - outflow) / total  # [-1, 1]
-            return max(-1.0, min(1.0, net)), True
+            return data.get("data") or data.get("result") or []
     except Exception as e:  # noqa: BLE001 - Nansen outage is non-fatal
-        logger.warning("Nansen smart-money fetch failed: %s", e)
-        return 0.0, False
+        logger.warning("Nansen POST %s failed: %s", path, e)
+        return None
 
 
-async def _volatility_proxy(symbols: list[str], sentiment_dispersion: float) -> float:
-    """Realized-volatility proxy in [0, 1].
+async def _fetch_market_signals(symbols: list[str]) -> tuple[float, float, Optional[float], dict]:
+    """Derive live signals from Nansen, returning (smart_money, breadth, volatility, sources).
 
-    With no reliable free historical price series for xStocks, we approximate market
-    uncertainty from the dispersion (stddev) of per-ticker sentiment — high disagreement
-    among tickers maps to higher uncertainty — anchored at a calm-market baseline of 0.4.
-    Pluggable: set ``AUTOPILOT_VOL_OVERRIDE`` to feed a real vol number in [0, 1].
+    - smart_money  : net direction of smart-money 24h USD flow across the biggest
+                     movers, in [-1, 1]. Sampled symmetrically (top inflows AND top
+                     outflows) and magnitude-weighted, so the sign reflects whether
+                     professional flow is net buying or selling. The old DESC-only
+                     query cherry-picked the most positive tokens and saturated at +1.00.
+    - breadth      : fraction of top-by-volume Mantle tokens whose 24h price is up,
+                     remapped to [-1, 1] — an unbiased market-wide sentiment proxy.
+    - volatility   : realized-volatility proxy in [0, 1] from the dispersion (stddev) of
+                     24h price changes across Mantle tokens, or None if unavailable.
     """
-    override = os.getenv("AUTOPILOT_VOL_OVERRIDE")
-    if override is not None:
-        try:
-            return max(0.0, min(1.0, float(override)))
-        except ValueError:
-            pass
-    base = 0.40
-    return max(0.0, min(1.0, base + sentiment_dispersion))
+    sources = {"nansen_flow": "fallback", "nansen_breadth": "fallback", "volatility": "proxy"}
+    smart_money, breadth, volatility = 0.0, 0.0, None
+
+    # Symmetric basket: biggest inflows (DESC) + biggest outflows (ASC). Combining both
+    # tails removes the positive bias; magnitude-weighting keeps the signal directional
+    # (near 0 when buying/selling pressure is balanced, not pinned to ±1).
+    inflows = await _nansen_post(
+        "/api/v1/smart-money/netflow",
+        {
+            "chains": ["ethereum", "mantle"],
+            "order_by": [{"field": "net_flow_24h_usd", "direction": "DESC"}],
+            "pagination": {"page": 1, "per_page": 50},
+        },
+    ) or []
+    outflows = await _nansen_post(
+        "/api/v1/smart-money/netflow",
+        {
+            "chains": ["ethereum", "mantle"],
+            "order_by": [{"field": "net_flow_24h_usd", "direction": "ASC"}],
+            "pagination": {"page": 1, "per_page": 50},
+        },
+    ) or []
+    seen: dict[str, float] = {}
+    for r in list(inflows) + list(outflows):
+        key = (r.get("token_address") or r.get("token_symbol") or "").lower()
+        if key and key not in seen:
+            seen[key] = float(r.get("net_flow_24h_usd") or 0)
+    flows = [f for f in seen.values() if f != 0]
+    if flows:
+        gross = sum(abs(f) for f in flows)
+        smart_money = max(-1.0, min(1.0, sum(flows) / gross)) if gross > 0 else 0.0
+        sources["nansen_flow"] = "live"
+
+    screener = await _nansen_post(
+        "/api/v1/token-screener",
+        {
+            "chains": ["mantle"],
+            "timeframe": "24h",
+            "pagination": {"page": 1, "per_page": 50},
+            "order_by": [{"field": "volume", "direction": "DESC"}],
+        },
+    )
+    if screener:
+        changes = [float(r.get("price_change") or 0) for r in screener]
+        changes = [c for c in changes if c != 0]
+        if changes:
+            up = sum(1 for c in changes if c > 0)
+            breadth = max(-1.0, min(1.0, (up / len(changes)) * 2 - 1))
+            sources["nansen_breadth"] = "live"
+            if len(changes) > 1:
+                # price_change is a fraction (e.g. 0.03 = +3%); dispersion → [0,1].
+                disp = statistics.pstdev(changes)
+                volatility = max(0.0, min(1.0, disp * 8.0))
+                sources["volatility"] = "live"
+
+    return smart_money, breadth, volatility, sources
+
+
+async def _altllm_sentiment(
+    symbols: list[str], smart_money: float, breadth: float, volatility: float
+) -> Optional[float]:
+    """AltLayer LLM sentiment read in [-1, 1], best-effort (None on failure).
+
+    AltLLM is an agentic, verbose model, so we give it room and parse the sentiment
+    number out of either the content or its reasoning trace. Never blocks a cycle.
+    """
+    tickers = ", ".join(s[:-1] if s.endswith("x") else s for s in symbols[:5])
+    prompt = (
+        f"Market snapshot: smart-money flow={smart_money:+.2f} in [-1,1], "
+        f"price breadth={breadth:+.2f} in [-1,1], volatility={volatility:.2f} in [0,1]. "
+        f"Watchlist: {tickers}. Judging risk appetite for AI/tech equities and crypto, "
+        f'reply with ONLY JSON {{"sentiment": x}} where x is a number in [-1,1]. '
+        f"Do not call tools; answer directly."
+    )
+    try:
+        async with httpx.AsyncClient(timeout=35.0) as client:
+            resp = await client.post(
+                f"{ALTLLM_BASE_URL}/v1/chat/completions",
+                json={
+                    "model": ALTLLM_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 400,
+                    "temperature": 0.2,
+                },
+            )
+            resp.raise_for_status()
+            msg = ((resp.json().get("choices") or [{}])[0]).get("message", {}) or {}
+            text = f"{msg.get('content') or ''} {msg.get('reasoning_content') or ''}"
+            m = re.search(r'sentiment"?\s*[:=]\s*(-?\d*\.?\d+)', text)
+            if not m:
+                m = re.search(r"-?\d*\.\d+", msg.get("content") or "")
+            if m:
+                return max(-1.0, min(1.0, float(m.group(1) if m.lastindex else m.group(0))))
+    except Exception as e:  # noqa: BLE001 - AltLLM outage is non-fatal
+        logger.warning("AltLLM sentiment failed: %s", e)
+    return None
 
 
 async def gather_signals(symbols: list[str]) -> Signals:
-    """Collect ELFA sentiment, Nansen flow, volatility proxy and USDY yield concurrently."""
+    """Collect live Nansen flow/breadth/volatility, ELFA sentiment and USDY yield.
+
+    Sentiment precedence: live ELFA text polarity if available (free tier rarely
+    returns tweet text), else the live Nansen market-breadth proxy, else neutral.
+    A manual ``AUTOPILOT_VOL_OVERRIDE`` in [0,1] always wins for volatility (useful
+    to demo a risk-off stress scenario on demand).
+    """
     sent_task = asyncio.create_task(fetch_portfolio_sentiment(symbols))
-    flow_task = asyncio.create_task(_fetch_smart_money_flow(symbols))
+    market_task = asyncio.create_task(_fetch_market_signals(symbols))
     yield_pct, oracle_ok = await asyncio.to_thread(_read_usdy_yield)
 
-    sentiment, sent_fallback = await sent_task
-    smart_money, flow_live = await flow_task
+    elfa_sentiment, sent_fallback = await sent_task
+    smart_money, breadth, live_vol, msrc = await market_task
 
-    # Per-ticker sentiment dispersion drives the volatility proxy.
-    try:
-        per_ticker = await _per_ticker_sentiment(symbols)
-        dispersion = statistics.pstdev(per_ticker) if len(per_ticker) > 1 else 0.0
-    except Exception:  # noqa: BLE001
-        dispersion = 0.0
-    volatility = await _volatility_proxy(symbols, dispersion * 0.5)
+    # Sentiment precedence: live ELFA text > AltLayer LLM read > live Nansen breadth
+    # > neutral. AltLLM gives a genuine, varied sentiment when ELFA's free tier is empty.
+    if not sent_fallback:
+        sentiment, sent_src = elfa_sentiment, "elfa-live"
+    else:
+        alt = await _altllm_sentiment(
+            symbols, smart_money, breadth, live_vol if live_vol is not None else 0.5
+        )
+        if alt is not None:
+            sentiment, sent_src = alt, "altllm-live"
+        elif msrc.get("nansen_breadth") == "live":
+            sentiment, sent_src = breadth, "nansen-breadth"
+        else:
+            sentiment, sent_src = 0.0, "fallback"
+
+    # Volatility: manual override > live dispersion > calm baseline.
+    override = os.getenv("AUTOPILOT_VOL_OVERRIDE")
+    if override is not None:
+        try:
+            volatility, vol_src = max(0.0, min(1.0, float(override))), "override"
+        except ValueError:
+            volatility, vol_src = (live_vol if live_vol is not None else 0.40), msrc["volatility"]
+    elif live_vol is not None:
+        volatility, vol_src = live_vol, "live"
+    else:
+        volatility, vol_src = 0.40, "proxy"
 
     return Signals(
         sentiment=round(sentiment, 4),
@@ -207,10 +353,10 @@ async def gather_signals(symbols: list[str]) -> Signals:
         volatility=round(volatility, 4),
         usdy_yield_pct=round(yield_pct, 4) if yield_pct is not None else 0.0,
         sources={
-            "elfa_sentiment": "fallback" if sent_fallback else "live",
-            "nansen_flow": "live" if flow_live else "fallback",
+            "elfa_sentiment": sent_src,
+            "nansen_flow": msrc["nansen_flow"],
             "usdy_oracle": "live" if oracle_ok else "fallback",
-            "volatility": "proxy",
+            "volatility": vol_src,
         },
     )
 
@@ -237,12 +383,15 @@ async def _per_ticker_sentiment(symbols: list[str]) -> list[float]:
 def classify_regime(signals: Signals, risk_profile: str) -> tuple[Regime, str]:
     """Rule-based regime classification, risk-profile aware.
 
-    Composite risk score = sentiment + smart_money - volatility_penalty, where the
-    penalty grows as volatility exceeds the calm midpoint.
+    Risk appetite = mean(sentiment, smart_money) in [-1, 1]; a volatility penalty
+    pulls the composite down as volatility exceeds the calm midpoint. The profile
+    shifts both the score thresholds and the hard volatility-off trigger, so the
+    same signals can map to different regimes per profile.
     """
     prof = RISK_PROFILES.get(risk_profile, RISK_PROFILES["balanced"])
-    vol_penalty = max(0.0, (signals.volatility - 0.5)) * 2.0  # [0, 1]
-    score = signals.sentiment + signals.smart_money - vol_penalty
+    risk_appetite = (signals.sentiment + signals.smart_money) / 2.0  # [-1, 1]
+    vol_penalty = max(0.0, (signals.volatility - 0.5)) * 0.8
+    score = risk_appetite - vol_penalty
 
     if signals.volatility >= prof["vol_off"] or score <= prof["off"]:
         regime = Regime.RISK_OFF
@@ -251,17 +400,21 @@ def classify_regime(signals: Signals, risk_profile: str) -> tuple[Regime, str]:
     else:
         regime = Regime.NEUTRAL
 
+    src = signals.sources or {}
     rule_reason = (
-        f"[{risk_profile}] sentiment={signals.sentiment:+.2f}, "
-        f"smart-money={signals.smart_money:+.2f}, vol={signals.volatility:.2f} "
+        f"[{risk_profile}] sent={signals.sentiment:+.2f}({src.get('elfa_sentiment', '?')}) "
+        f"flow={signals.smart_money:+.2f}({src.get('nansen_flow', '?')}) "
+        f"vol={signals.volatility:.2f}({src.get('volatility', '?')}) "
         f"=> score={score:+.2f} -> {REGIME_LABELS[regime]}"
     )
     return regime, rule_reason
 
 
-def target_allocation(regime: Regime, symbols: list[str]) -> tuple[tuple[int, int, int], dict]:
+def target_allocation(
+    regime: Regime, symbols: list[str], risk_profile: str = "balanced"
+) -> tuple[tuple[int, int, int], dict]:
     """Return ((wStocks,wUSDY,wMETH) bps, {symbol: bps_within_xstocks_layer})."""
-    layers = REGIME_WEIGHTS_BPS[regime]
+    layers = regime_weights_bps(regime, risk_profile)
     picks = [s for s in symbols if s][:5] or DEFAULT_SYMBOLS
     n = len(picks)
     base = 10000 // n
@@ -273,49 +426,62 @@ def target_allocation(regime: Regime, symbols: list[str]) -> tuple[tuple[int, in
 async def generate_reason(
     regime: Regime, signals: Signals, layers: tuple[int, int, int], rule_reason: str
 ) -> str:
-    """LLM ("AltLLM") final rationale, falling back to the deterministic rule summary."""
+    """AltLayer LLM ("AltLLM") final rationale + a compact live/fallback feed map.
+
+    The feed map is always appended so the on-chain ``reason`` is transparent about
+    which data was live this cycle vs which fell back to a proxy/neutral default.
+    """
     s, u, m = (x / 100 for x in layers)
+    src = signals.sources or {}
+    feed_tag = (
+        f" | feeds: sentiment={src.get('elfa_sentiment', '?')}, "
+        f"nansen={src.get('nansen_flow', '?')}, vol={src.get('volatility', '?')}, "
+        f"usdy={src.get('usdy_oracle', '?')}"
+    )
     fallback = (
         f"Regime: {REGIME_LABELS[regime]}. Target {s:.0f}% xStocks / {u:.0f}% USDY / "
         f"{m:.0f}% mETH. {rule_reason}. USDY yield {signals.usdy_yield_pct:.2f}%."
     )
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return fallback
+    base_reason = fallback
     try:
-        from openai import AsyncOpenAI
-
-        client = AsyncOpenAI(api_key=api_key)
-        resp = await client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are StockPilot AI's autonomous RWA yield agent. In 1-2 concise "
-                        "sentences, justify the 3-layer allocation (xStocks growth / USDY "
-                        "treasuries / mETH staking yield) for a sophisticated investor. State "
-                        "the regime and the key signals. No preamble."
-                    ),
+        async with httpx.AsyncClient(timeout=40.0) as client:
+            resp = await client.post(
+                f"{ALTLLM_BASE_URL}/v1/chat/completions",
+                json={
+                    "model": ALTLLM_MODEL,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are StockPilot AI's autonomous RWA yield agent on Mantle. "
+                                "In 1-2 concise sentences justify the 3-layer allocation (xStocks "
+                                "growth / USDY treasuries / mETH staking yield). State the regime "
+                                "and the key signals. No preamble, no lists. Do not call tools."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Regime={REGIME_LABELS[regime]}; sentiment={signals.sentiment:+.2f}; "
+                                f"smart_money={signals.smart_money:+.2f}; volatility={signals.volatility:.2f}; "
+                                f"USDY_yield={signals.usdy_yield_pct:.2f}%; target % "
+                                f"stocks/usdy/meth={s:.0f}/{u:.0f}/{m:.0f}."
+                            ),
+                        },
+                    ],
+                    "max_tokens": 400,
+                    "temperature": 0.4,
                 },
-                {
-                    "role": "user",
-                    "content": (
-                        f"Regime={REGIME_LABELS[regime]}; sentiment={signals.sentiment:+.2f}; "
-                        f"smart_money={signals.smart_money:+.2f}; volatility={signals.volatility:.2f}; "
-                        f"USDY_yield={signals.usdy_yield_pct:.2f}%; target bps "
-                        f"stocks/usdy/meth={layers}."
-                    ),
-                },
-            ],
-            max_tokens=120,
-            temperature=0.4,
-        )
-        text = (resp.choices[0].message.content or "").strip()
-        return text or fallback
+            )
+            resp.raise_for_status()
+            text = (
+                ((resp.json().get("choices") or [{}])[0]).get("message", {}).get("content") or ""
+            ).strip()
+            if text:
+                base_reason = text
     except Exception as e:  # noqa: BLE001
-        logger.warning("LLM regime reason failed, using fallback: %s", e)
-        return fallback
+        logger.warning("AltLLM regime reason failed, using fallback: %s", e)
+    return (base_reason[:170] + feed_tag)
 
 
 # --- Guardrails (mirror the on-chain checks so we fail fast off-chain) ---
@@ -325,7 +491,7 @@ def check_guardrails(regime: Regime, layers: tuple[int, int, int]) -> Optional[s
     w_stocks, w_usdy, w_meth = layers
     if w_stocks + w_usdy + w_meth != 10000:
         return "weights must sum to 10000"
-    cap = 7000
+    cap = 7500
     if max(layers) > cap:
         return f"asset weight exceeds guardrail ({cap} bps)"
     if regime == Regime.RISK_OFF and w_usdy < 5000:
@@ -358,9 +524,19 @@ def plan_rebalance(layers: tuple[int, int, int], intra: dict, notional_usd: floa
 
 
 def _agent_holds_assets(w3: Web3, wallet: str) -> bool:
+    """True if the wallet holds any tradable capital — USDC/USDY/mETH OR an xStock.
+
+    Checks ORIGINAL xStock addresses (and their wrappers), not just USDC/USDY/mETH,
+    so a wallet funded only with e.g. NVDAx still counts as funded.
+    """
+    from agent.portfolio_reader import XSTOCK_TOKENS
+
     erc = [{"name": "balanceOf", "type": "function", "inputs": [{"type": "address"}],
             "outputs": [{"type": "uint256"}], "stateMutability": "view"}]
-    for addr in (USDY_TOKEN, METH_TOKEN, USDC_TOKEN):
+    addrs = [USDY_TOKEN, METH_TOKEN, USDC_TOKEN]
+    for reg in XSTOCK_TOKENS.values():
+        addrs.extend((reg["original"], reg["wrapper"]))
+    for addr in addrs:
         try:
             c = w3.eth.contract(address=Web3.to_checksum_address(addr), abi=erc)
             if c.functions.balanceOf(Web3.to_checksum_address(wallet)).call() > 0:
@@ -368,6 +544,12 @@ def _agent_holds_assets(w3: Web3, wallet: str) -> bool:
         except Exception:  # noqa: BLE001
             continue
     return False
+
+
+def _parse_next_nonce(err_msg: str) -> Optional[int]:
+    """Extract the suggested nonce from a Mantle 'nonce too low: next nonce N' error."""
+    m = re.search(r"next nonce (\d+)", err_msg)
+    return int(m.group(1)) if m else None
 
 
 def record_decision_onchain(
@@ -388,25 +570,46 @@ def record_decision_onchain(
             address=Web3.to_checksum_address(STOCKPILOT_CONTRACT_ADDRESS), abi=AGENT_ABI
         )
         w_stocks, w_usdy, w_meth = layers
-        tx = contract.functions.recordDecision(
-            int(regime), int(w_stocks), int(w_usdy), int(w_meth), reason[:240]
-        ).build_transaction({
-            "from": acct.address,
-            "nonce": w3.eth.get_transaction_count(acct.address),
-            "gas": 400000,
-            "gasPrice": w3.eth.gas_price,
-            "chainId": 5000,
-        })
-        signed = acct.sign_transaction(tx)
-        # web3.py v6 exposes `rawTransaction`; v7 renamed it to `raw_transaction`.
-        raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
-        tx_hash = w3.eth.send_raw_transaction(raw)
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
-        h = receipt.transactionHash.hex()
-        if not h.startswith("0x"):
-            h = "0x" + h
-        logger.info("recordDecision tx mined: %s (status=%s)", h, receipt.status)
-        return h
+        # Seed from pending so we account for any swap txs broadcast earlier in
+        # this same cycle. On Mantle the sequencer can briefly report a stale
+        # count, so we retry and adopt the "next nonce N" it suggests.
+        nonce = w3.eth.get_transaction_count(acct.address, "pending")
+        last_err: Optional[Exception] = None
+        for _attempt in range(6):
+            tx = contract.functions.recordDecision(
+                int(regime), int(w_stocks), int(w_usdy), int(w_meth), reason[:240]
+            ).build_transaction({
+                "from": acct.address,
+                "nonce": nonce,
+                "gas": 400000,
+                "gasPrice": w3.eth.gas_price,
+                "chainId": 5000,
+            })
+            signed = acct.sign_transaction(tx)
+            # web3.py v6 exposes `rawTransaction`; v7 renamed it to `raw_transaction`.
+            raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
+            try:
+                tx_hash = w3.eth.send_raw_transaction(raw)
+            except Exception as send_err:  # noqa: BLE001
+                last_err = send_err
+                suggested = _parse_next_nonce(str(send_err))
+                if suggested is not None and suggested != nonce:
+                    logger.warning(
+                        "recordDecision nonce %s rejected; retrying with %s",
+                        nonce, suggested,
+                    )
+                    nonce = suggested
+                    continue
+                nonce += 1  # generic bump and retry
+                continue
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+            h = receipt.transactionHash.hex()
+            if not h.startswith("0x"):
+                h = "0x" + h
+            logger.info("recordDecision tx mined: %s (status=%s)", h, receipt.status)
+            return h
+        logger.error("On-chain recordDecision failed after retries: %s", last_err)
+        return None
     except Exception as e:  # noqa: BLE001
         logger.error("On-chain recordDecision failed: %s", e)
         return None
@@ -438,9 +641,9 @@ class AutopilotAgent:
         notional_usd: Optional[float] = None,
     ) -> dict:
         if symbols is not None:
-            picks = [s for s in symbols if s][:5]
-            if len(picks) < 3:
-                return {"error": "Select between 3 and 5 xStocks"}
+            picks = [s for s in symbols if s]
+            if len(picks) < 1:
+                return {"error": "Select at least 1 xStock"}
             self.symbols = picks
         if risk_profile is not None:
             if risk_profile not in RISK_PROFILES:
@@ -463,6 +666,7 @@ class AutopilotAgent:
             "next_run_ts": self.next_run_ts,
             "live_swaps": LIVE_SWAPS,
             "contract": STOCKPILOT_CONTRACT_ADDRESS,
+            "agent_wallet": self.agent_address(),
             "agent_funded": self._funded_flag(),
             "last_decision": self.last_decision,
             "decision_count": len(self.history),
@@ -478,6 +682,26 @@ class AutopilotAgent:
         except Exception:  # noqa: BLE001
             return False
 
+    def agent_address(self) -> Optional[str]:
+        """Public address of the agent signer, or None when no key is configured."""
+        if not AGENT_PRIVATE_KEY:
+            return os.getenv("AGENT_WALLET_ADDRESS")
+        try:
+            return Web3().eth.account.from_key(AGENT_PRIVATE_KEY).address
+        except Exception:  # noqa: BLE001
+            return None
+
+    async def portfolio(self) -> dict:
+        """Read the agent wallet's real on-chain holdings, valued in USD.
+
+        Counts the original xStock tokens (not just the ERC-4626 wrappers) so the
+        UI shows true current allocation vs the on-chain target weights.
+        """
+        addr = self.agent_address()
+        if not addr:
+            return {"ok": False, "error": "No agent wallet configured", "holdings": []}
+        return await asyncio.to_thread(read_agent_portfolio, addr, self.symbols)
+
     async def run_cycle(self, record: bool = True) -> dict:
         """Run one full autonomous cycle and return the decision record."""
         if self._running_cycle:
@@ -486,23 +710,32 @@ class AutopilotAgent:
         try:
             signals = await gather_signals(self.symbols)
             regime, rule_reason = classify_regime(signals, self.risk_profile)
-            layers, intra = target_allocation(regime, self.symbols)
+            layers, intra = target_allocation(regime, self.symbols, self.risk_profile)
 
             gerr = check_guardrails(regime, layers)
             if gerr:
                 # Should not happen with the static tables, but enforce defensively.
                 logger.error("Guardrail violation pre-record: %s", gerr)
-                regime, layers = Regime.NEUTRAL, REGIME_WEIGHTS_BPS[Regime.NEUTRAL]
-                _, intra = target_allocation(regime, self.symbols)
+                regime, layers = Regime.NEUTRAL, regime_weights_bps(Regime.NEUTRAL, self.risk_profile)
+                _, intra = target_allocation(regime, self.symbols, self.risk_profile)
                 rule_reason += f" | guardrail fallback to neutral ({gerr})"
 
             reason = await generate_reason(regime, signals, layers, rule_reason)
-            swaps = plan_rebalance(layers, intra, self.notional_usd)
 
             # Decide simulated vs live execution. Real swaps require explicit opt-in + funds.
             simulated = not (LIVE_SWAPS and self._funded_flag())
-            for sw in swaps:
-                sw["status"] = "simulated" if simulated else "pending"
+            portfolio_snapshot = None
+            if simulated:
+                swaps = plan_rebalance(layers, intra, self.notional_usd)
+                for sw in swaps:
+                    sw["status"] = "simulated"
+            else:
+                # Live: size swaps from the REAL on-chain portfolio and execute them.
+                portfolio_snapshot = await self.portfolio()
+                swaps = await asyncio.to_thread(
+                    execute_rebalance_swaps,
+                    AGENT_PRIVATE_KEY, portfolio_snapshot, layers, intra, self.symbols,
+                )
 
             tx_hash = None
             if record:
@@ -521,6 +754,7 @@ class AutopilotAgent:
                 swaps=swaps,
                 tx_hash=tx_hash,
                 simulated=simulated,
+                portfolio=portfolio_snapshot,
             )
             decision = asdict(rec)
             self.last_decision = decision

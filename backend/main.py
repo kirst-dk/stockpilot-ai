@@ -6,6 +6,12 @@ import logging
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
+
+# Load .env BEFORE importing local modules: several of them read configuration
+# (private keys, RPC URLs, AUTOPILOT_* flags) into module-level constants at
+# import time, so the environment must be populated first.
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -16,8 +22,6 @@ from fluxion.client import FluxionClient
 from agent.ai_engine import AIEngine
 from agent.portfolio_agent import PortfolioAgent, AVAILABLE_STRATEGIES, YIELD_STRATEGIES
 from agent.autopilot import autopilot, RISK_PROFILES
-
-load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -155,6 +159,23 @@ class AutopilotToggleRequest(BaseModel):
     enabled: bool
 
 
+class StrategyPlanRequest(BaseModel):
+    amount_usdc: float
+    wallet_address: str | None = None
+    risk_profile: str | None = None
+    symbols: list[str] | None = None
+    region: str | None = None
+
+
+class StrategyRecordRequest(BaseModel):
+    regime: int
+    w_stocks: int
+    w_usdy: int
+    w_meth: int
+    reason: str | None = None
+    tx_hash: str | None = None
+
+
 # --- Endpoints ---
 
 @app.get("/")
@@ -267,6 +288,110 @@ async def set_strategy(req: StrategyRequest):
     return result
 
 
+@app.get("/api/strategy/tokens")
+async def strategy_tokens(refresh: bool = False):
+    """Tradable xStock universe, synced live with Fluxion pools.
+
+    Verified on-chain each refresh (inactive pools drop out) and, when an
+    ETHERSCAN_API_KEY is configured, auto-extended with newly-listed Fluxion
+    xStock pools so new tokens appear without any code change.
+    """
+    from agent.tokens import get_tradable_tokens
+
+    tokens = await asyncio.to_thread(get_tradable_tokens, refresh)
+    return {"tokens": tokens, "count": len(tokens)}
+
+
+@app.post("/api/strategy/plan")
+async def strategy_plan(req: StrategyPlanRequest):
+    """Manual cycle: analyse the market for a USDC amount and return the 3-layer
+    target weights plus the concrete swap legs the user signs in ONE transaction.
+
+    Pure analysis — no on-chain writes and no funds moved. Legs are sized to
+    rebalance the whole portfolio toward target weights using only the new USDC.
+    """
+    from agent.manual import build_plan
+
+    plan = await build_plan(
+        amount_usdc=req.amount_usdc,
+        user_wallet=req.wallet_address,
+        risk_profile=(req.risk_profile or "balanced"),
+        symbols=req.symbols,
+        region=req.region,
+    )
+    if not plan.get("ok"):
+        raise HTTPException(400, plan.get("error", "plan failed"))
+    return plan
+
+
+@app.get("/api/strategy/usdy_quote")
+async def strategy_usdy_quote(amount_usdc: float = 0.0, side: str = "buy", wallet: str = ""):
+    """Fresh pre-trade quote for the USDY layer, fetched right before signing.
+
+    For "buy" it returns the **best route** (Relay primary, Agni multi-hop
+    fallback) with the ready-to-sign execution payload: Relay ``steps`` +
+    ``request_id`` or Agni ``path`` + ``min_out``, plus the honest ``routes``
+    comparison, price impact (bps) and fee breakdown. "sell" stays on Agni
+    (amount_usdc is interpreted as USDY).
+    """
+    from agent.portfolio_reader import _w3
+    from agent import agni, routing
+
+    w3 = await asyncio.to_thread(_w3)
+    if side == "sell":
+        return await asyncio.to_thread(agni.quote_usdy_sell, w3, amount_usdc)
+    return await asyncio.to_thread(routing.best_usdy_buy, w3, wallet, amount_usdc)
+
+
+@app.get("/api/strategy/relay_status")
+async def strategy_relay_status(request_id: str = ""):
+    """Proxy the Relay intent status so the frontend can poll fulfilment.
+
+    Same-chain swaps fill in the swap tx itself; this lets the UI confirm the
+    Relay solver marked the request ``success`` before showing the USDY balance.
+    """
+    from agent import relay
+
+    return await asyncio.to_thread(relay.get_status, request_id)
+
+
+@app.get("/api/strategy/portfolio")
+async def strategy_portfolio(wallet: str = ""):
+    """Real on-chain holdings of ``wallet`` across the 3 layers + cash, valued in USD.
+
+    Reads USDC, USDY, mETH and every live xStock (original + ERC-4626 wrapper) from
+    the dynamic Fluxion token list, so the Builder shows the actual Portfolio Value,
+    per-asset list and allocation % instead of a blank profile.
+    """
+    from agent.portfolio_reader import read_agent_portfolio
+
+    if not wallet:
+        raise HTTPException(400, "wallet query param required")
+    pf = await asyncio.to_thread(read_agent_portfolio, wallet, None)
+    return pf
+
+
+@app.post("/api/strategy/record")
+async def strategy_record(req: StrategyRecordRequest):
+    """Record a confirmed manual-cycle decision on-chain (recordDecision).
+
+    Called by the frontend after the user's execution tx is mined so the cycle
+    appears in Decision History with the live regime/weights/reason.
+    """
+    from agent.autopilot import Regime, record_decision_onchain
+
+    reason = (req.reason or "manual cycle")
+    if req.tx_hash:
+        reason = f"{reason} | exec={req.tx_hash[:14]}"
+    tx_hash = await asyncio.to_thread(
+        record_decision_onchain,
+        Regime(req.regime),
+        (req.w_stocks, req.w_usdy, req.w_meth),
+        reason,
+    )
+    return {"tx_hash": tx_hash, "recorded": tx_hash is not None}
+
+
 @app.get("/api/strategies")
 async def list_strategies():
     """List available trading strategies."""
@@ -350,10 +475,61 @@ async def autopilot_run():
     return result
 
 
+class DcaStartRequest(BaseModel):
+    amount_usdc: float
+    risk_profile: str | None = None
+    duration_sec: int
+    interval_sec: int
+    symbols: list[str] | None = None
+
+
+@app.post("/api/autopilot/dca/start")
+async def autopilot_dca_start(req: DcaStartRequest):
+    """Start a time-sliced DCA plan (deposit model — autonomous tranche buys)."""
+    from agent.dca import dca
+
+    result = dca.start(
+        amount_usdc=req.amount_usdc,
+        risk_profile=(req.risk_profile or "balanced"),
+        duration_sec=req.duration_sec,
+        interval_sec=req.interval_sec,
+        symbols=req.symbols,
+    )
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@app.get("/api/autopilot/dca/status")
+async def autopilot_dca_status():
+    """Progress of the active DCA plan (cycles done/total, spent/remaining, next run)."""
+    from agent.dca import dca
+
+    return dca.status()
+
+
+@app.post("/api/autopilot/dca/stop")
+async def autopilot_dca_stop():
+    """Stop the active DCA plan (remaining capital is left untouched)."""
+    from agent.dca import dca
+
+    return dca.stop()
+
+
 @app.get("/api/autopilot/activity")
 async def autopilot_activity(limit: int = 20):
     """Recent agent decisions (newest first) for the Agent Activity feed."""
     return {"decisions": autopilot.history[: max(1, min(limit, 50))]}
+
+
+@app.get("/api/autopilot/portfolio")
+async def autopilot_portfolio():
+    """Agent wallet's real on-chain holdings valued in USD (current allocation).
+
+    Counts the ORIGINAL xStock tokens plus their ERC-4626 wrappers, so a wallet
+    holding e.g. NVDAx shows its true USD value rather than ~0.
+    """
+    return await autopilot.portfolio()
 
 
 @app.get("/api/history")
