@@ -3076,8 +3076,6 @@ type StrategyPlan = {
     wallet: { screened: boolean; sanctioned: boolean; reason: string };
     blocked: string[];
     blocked_usdc: number;
-    warnings: { symbol: string; asset_class: string; reason: string }[];
-    warned: string[];
     disclosures: Record<string, string>;
     note: string;
   };
@@ -3800,18 +3798,16 @@ export function AutopilotTabContent() {
                 <div className="text-[9px] text-amber-200/70 leading-relaxed rounded-lg border border-amber-500/15 bg-amber-500/[0.04] px-3 py-2">
                   <span className="font-semibold text-amber-200/90">Eligibility &amp; risk:</span> xStocks and USDY are tokenized securities (RWAs). KYC/eligibility is enforced by the issuers (Backed, Ondo) at mint/redeem; some assets are restricted for US persons and sanctioned jurisdictions. StockPilot is a non-custodial tool — you sign from your own wallet. This is not investment advice. <a href="/compliance" className="underline hover:text-amber-100">Compliance &amp; disclosures →</a>
                 </div>
-                {plan.compliance?.wallet.sanctioned && (
+                {plan.compliance && (plan.compliance.blocked.length > 0 || plan.compliance.wallet.sanctioned) && (
                   <div className="text-[10px] leading-relaxed rounded-lg border border-rose-500/25 bg-rose-500/[0.06] px-3 py-2 text-rose-100/85">
-                    <div className="font-semibold text-rose-200">Compliance — sanctioned-address screening</div>
-                    <div className="mt-1">Wallet failed OFAC screening — all legs blocked. This is a hard block.</div>
-                  </div>
-                )}
-                {plan.compliance && !plan.compliance.wallet.sanctioned && plan.compliance.warnings.length > 0 && (
-                  <div className="text-[10px] leading-relaxed rounded-lg border border-amber-500/30 bg-amber-500/[0.07] px-3 py-2 text-amber-100/85">
-                    <div className="font-semibold text-amber-200">Eligibility check — region {plan.compliance.region}</div>
-                    <div className="mt-1">
-                      <span className="font-semibold">{plan.compliance.warned.join(", ")}</span> {plan.compliance.warned.length > 1 ? "are" : "is"} restricted for {plan.compliance.region} persons by the issuers (Backed/Ondo). You may proceed only if you are eligible to hold these RWAs — by signing you self-certify eligibility. This is advisory, not legal advice.
-                    </div>
+                    <div className="font-semibold text-rose-200">Compliance gate — region {plan.compliance.region}</div>
+                    {plan.compliance.wallet.sanctioned ? (
+                      <div className="mt-1">Wallet failed sanctioned-address screening — all legs blocked.</div>
+                    ) : (
+                      <div className="mt-1">
+                        Blocked (restricted asset class): <span className="font-semibold">{plan.compliance.blocked.join(", ")}</span> — {plan.compliance.blocked_usdc.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC kept as USDC, not traded. Other legs proceed.
+                      </div>
+                    )}
                   </div>
                 )}
                 {execStep && <div className="text-[11px] text-blue-200 flex items-center gap-2"><span className="w-3 h-3 rounded-full border-2 border-blue-300/40 border-t-blue-300 animate-spin" />{execStep}</div>}
