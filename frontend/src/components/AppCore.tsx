@@ -2996,6 +2996,8 @@ type StrategyLeg = {
   slippage_bps?: number;
   tradable?: boolean;
   note?: string;
+  compliance?: { disclosure?: string; asset_class?: string; issuer?: string };
+  compliance_blocked?: boolean;
 };
 type RelayStep = { id: string; to: string; data: string; value: string; chainId: number };
 type UsdyFees = { relay_usd?: number; app_usd?: number; swap_usd?: number; execution_usd?: number; gas_usd?: number };
@@ -3027,6 +3029,8 @@ type UsdyLeg = {
   routes?: { relay?: UsdyRouteSummary; agni?: UsdyRouteSummary };
   chosen_reason?: string;
   note: string;
+  compliance?: { disclosure?: string; asset_class?: string; issuer?: string };
+  compliance_blocked?: boolean;
 };
 // Shape returned by /api/strategy/usdy_quote (routing.best_usdy_buy) — fetched
 // fresh right before signing. Uses backend key names (exec_usdc/amount_in_wei).
@@ -3065,6 +3069,14 @@ type StrategyPlan = {
   current_usd: { xstocks: number; meth: number };
   total_target_usd: number;
   deadline: number;
+  compliance?: {
+    region: string;
+    wallet: { screened: boolean; sanctioned: boolean; reason: string };
+    blocked: string[];
+    blocked_usdc: number;
+    disclosures: Record<string, string>;
+    note: string;
+  };
 };
 
 type DcaCycle = { idx: number; ts: number; regime: number; regime_label: string; weights_bps: number[]; slice_usdc: number; reason: string; tx_hash: string | null };
@@ -3111,6 +3123,9 @@ export function AutopilotTabContent() {
   const [notice, setNotice] = useState<string | null>(null);
   const [selSymbols, setSelSymbols] = useState<string[]>(["AAPLx", "NVDAx", "SPYx"]);
   const [riskProfile, setRiskProfile] = useState<string>("balanced");
+  // Self-declared jurisdiction — drives the pre-trade compliance gate (honesty
+  // control, not a legal geofence). "" = unspecified (no restriction applied).
+  const [region, setRegion] = useState<string>("");
   // Tradable xStock universe, synced live with Fluxion pools (falls back to a
   // static list if the agent is unreachable).
   const [tradable, setTradable] = useState<string[]>(XSTOCK_CHOICES);
@@ -3289,6 +3304,7 @@ export function AutopilotTabContent() {
           wallet_address: address ?? null,
           risk_profile: riskProfile,
           symbols: selSymbols,
+          region: region || null,
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -3412,7 +3428,7 @@ export function AutopilotTabContent() {
       let usdyHash: `0x${string}` | null = null;
       let usdyRouteUsed: string | null = null;
       const planLeg = plan.usdy_leg;
-      if (planLeg && BigInt(planLeg.amount_usdc) > BigInt(0)) {
+      if (planLeg && !planLeg.compliance_blocked && BigInt(planLeg.amount_usdc) > BigInt(0)) {
         let ul: UsdyLeg = planLeg;
         try {
           const fr = await fetch(`${BACKEND_URL}/api/strategy/usdy_quote?side=buy&amount_usdc=${planLeg.est_usd}&wallet=${address}`);
@@ -3780,6 +3796,18 @@ export function AutopilotTabContent() {
                 <div className="text-[9px] text-amber-200/70 leading-relaxed rounded-lg border border-amber-500/15 bg-amber-500/[0.04] px-3 py-2">
                   <span className="font-semibold text-amber-200/90">Eligibility &amp; risk:</span> xStocks and USDY are tokenized securities (RWAs). KYC/eligibility is enforced by the issuers (Backed, Ondo) at mint/redeem; some assets are restricted for US persons and sanctioned jurisdictions. StockPilot is a non-custodial tool — you sign from your own wallet. This is not investment advice. <a href="/compliance" className="underline hover:text-amber-100">Compliance &amp; disclosures →</a>
                 </div>
+                {plan.compliance && (plan.compliance.blocked.length > 0 || plan.compliance.wallet.sanctioned) && (
+                  <div className="text-[10px] leading-relaxed rounded-lg border border-rose-500/25 bg-rose-500/[0.06] px-3 py-2 text-rose-100/85">
+                    <div className="font-semibold text-rose-200">Compliance gate — region {plan.compliance.region}</div>
+                    {plan.compliance.wallet.sanctioned ? (
+                      <div className="mt-1">Wallet failed sanctioned-address screening — all legs blocked.</div>
+                    ) : (
+                      <div className="mt-1">
+                        Blocked (restricted asset class): <span className="font-semibold">{plan.compliance.blocked.join(", ")}</span> — {plan.compliance.blocked_usdc.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC kept as USDC, not traded. Other legs proceed.
+                      </div>
+                    )}
+                  </div>
+                )}
                 {execStep && <div className="text-[11px] text-blue-200 flex items-center gap-2"><span className="w-3 h-3 rounded-full border-2 border-blue-300/40 border-t-blue-300 animate-spin" />{execStep}</div>}
                 <div className="flex items-center gap-2 pt-1">
                   <button onClick={() => setPlan(null)} disabled={executing} className="flex-1 px-4 py-2.5 rounded-lg text-xs font-semibold border border-white/10 bg-white/[0.03] text-white/60 hover:bg-white/[0.07] disabled:opacity-40">Cancel</button>
@@ -3863,6 +3891,15 @@ export function AutopilotTabContent() {
             </button>
           ))}
           <button onClick={saveConfig} className="ml-auto px-4 py-2 rounded-lg text-xs font-bold bg-blue-500/20 text-blue-200 border border-blue-500/30 hover:bg-blue-500/30">Save strategy</button>
+        </div>
+        <div className="mt-3 text-[11px] text-white/50 mb-2">Jurisdiction <span className="text-white/30">(compliance gate — RWA securities are restricted in some regions)</span></div>
+        <div className="flex flex-wrap items-center gap-2">
+          {[["", "Unspecified"], ["PT", "EU / Other"], ["US", "United States"], ["RU", "Sanctioned"]].map(([code, label]) => (
+            <button key={code} onClick={() => setRegion(code)} className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition ${region === code ? "border-amber-500/40 bg-amber-500/15 text-amber-200" : "border-white/10 bg-white/[0.02] text-white/50 hover:bg-white/[0.05]"}`}>
+              {label}
+            </button>
+          ))}
+          <a href="/compliance" className="ml-auto text-[10px] text-white/35 underline hover:text-white/55">Why?</a>
         </div>
         {lastDecision?.simulated && (
           <div className="mt-3 text-[10px] text-amber-300/80">Swaps run in <b>simulation</b> (agent wallet holds no portfolio assets). On-chain <code>recordDecision</code> is real. Fund the wallet and set <code>AUTOPILOT_LIVE_SWAPS=1</code> for live trades.</div>
