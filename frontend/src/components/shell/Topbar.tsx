@@ -13,6 +13,8 @@ const TITLES: Record<string, { title: string; subtitle: string }> = {
   "/portfolio": { title: "Portfolio Builder", subtitle: "Design & analyze your allocation" },
   "/strategies": { title: "Strategies", subtitle: "AI-curated RWA strategies" },
   "/education": { title: "Education", subtitle: "Learn xStocks, Mantle & DeFi" },
+  "/compliance": { title: "Compliance", subtitle: "Regulatory posture & disclosures" },
+  "/business": { title: "Business & Economics", subtitle: "Revenue model, market & moat" },
 };
 
 function ConnectWallet() {

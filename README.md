@@ -268,6 +268,42 @@ Mean reversion strategy — buys on significant pullbacks, trims on extended ral
 | [AltLLM](https://altlayer.io) | AI analysis |
 | [RainbowKit](https://rainbowkit.com) | Wallet connection |
 
+## Compliance & Regulatory Awareness
+
+StockPilot AI manages **tokenized securities** (xStocks tokenized equities, USDY tokenized US Treasuries). We treat these as regulated real-world assets, not generic crypto tokens, and design the product around that reality:
+
+- **Asset issuers handle primary KYC/AML.** xStocks (Backed Finance) and USDY (Ondo) gate primary issuance/redemption behind their own KYC, accredited/eligible-investor checks, and jurisdiction screening. StockPilot operates strictly on the **secondary, already-tokenized** representation on Mantle and never mints, redeems, or custodies the underlying — it is a **non-custodial portfolio manager**: every swap is signed from the user's own wallet.
+- **Jurisdiction posture.** USDY and several xStocks are **not available to US persons** and are restricted in sanctioned jurisdictions. StockPilot surfaces these restrictions in-app (asset-level disclaimers + a regional gate) and does not solicit restricted users. This is informational tooling, **not investment advice**.
+- **AI-assisted compliance gate (roadmap, in progress).** Before any buy, the agent runs a lightweight pre-trade compliance check: (1) asset eligibility flag (is this xStock restricted in the connected region?), (2) sanctioned-address screening of the connected wallet, (3) per-asset risk disclosure shown in the confirm modal. Decisions that touch a restricted asset are blocked and surfaced honestly rather than silently executed.
+- **Auditability for regulators.** Because every agent decision is written on-chain (`recordDecision`), there is a permanent, timestamped, tamper-evident audit trail of *what* the agent did and *why* — useful for the suitability/record-keeping obligations that apply to managed-account products.
+
+> StockPilot AI is experimental hackathon software. Nothing here is investment, legal, or tax advice. Tokenized equities and treasuries are securities subject to the rules of their issuer and the user's jurisdiction; users are responsible for their own eligibility.
+
+## AI Verifiability & Auditability
+
+The "Turing test" premise of the track is that an AI agent's track record should be **independently verifiable**, not self-reported. Every autopilot cycle:
+
+- Writes the regime, the three-layer target weights, the live signal values, and a human-readable `reason` on-chain via `recordDecision` → permanently queryable on [Mantlescan](https://mantlescan.xyz/address/0xbbE80ACe5c46b49930ff0229762a1A57BE4CA6F4).
+- Records in `reason` **which feeds were live vs fallback** (Nansen / ELFA / AltLLM / USDY oracle) and the numeric signal values, so an auditor can tell genuine market input from defaults (no more constant `+1.00 / +1.00`).
+- Is reproducible: the regime→allocation mapping and guardrails are deterministic given the recorded signals, so anyone can re-derive the weights the agent chose.
+
+## Business Model, Tokenomics & GTM
+
+| Pillar | Detail |
+|--------|--------|
+| **Who** | Crypto-native investors who want regulated equity/treasury exposure on-chain without running a desk, plus Web2 users seeking a "robo-advisor for tokenized RWAs". |
+| **Revenue** | (1) **Management fee** — small annualized bps on assets under autopilot, accrued per rebalance; (2) **Performance fee** — bps on realized gains above a high-water mark; (3) **Premium Autopilot** — advanced risk profiles, higher cycle frequency, and priority signal feeds as a subscription. All fee logic is on-chain and transparent. |
+| **Why Mantle** | Low gas makes frequent autonomous rebalancing economically viable (a fee-bearing rebalance on an L1 would be eaten by gas); Mantle already hosts the RWA stack we need natively — USDY, mETH, Fluxion, bridged xStocks. |
+| **GTM** | (1) Hackathon → mainnet beta with capped TVL; (2) integrate as a managed-strategy front-end for Fluxion/xStocks liquidity; (3) partner distribution via Mantle RWA ecosystem; (4) open the on-chain track record as a public "agent leaderboard" to build trust before scaling AUM. |
+| **Moat** | Verifiable on-chain performance history + RWA-specific compliance posture + multi-feed AI signal fusion are hard to replicate vs a generic swap UI. |
+
+## Security
+
+- **Guardrails enforced on-chain** inside `recordDecision`: weights must sum to `10000` bps, no single layer above `maxAssetWeight` (70%), and in risk-off USDY must be ≥ `minUSDYWeightRiskOff`. Invalid decisions revert.
+- **Access control:** `recordDecision` is agent-only; guardrail/agent changes are `Ownable` owner-only (OpenZeppelin).
+- **Non-custodial:** the protocol never holds user funds; all swaps (Fluxion, Relay, Agni) are signed from the user's own wallet, with a soft price-impact cap (800 bps) and explicit slippage bounds.
+- **No secrets in repo/frontend:** Nansen/ELFA/AltLLM keys live only in server-side env behind the API proxy.
+
 ## License
 
 MIT
