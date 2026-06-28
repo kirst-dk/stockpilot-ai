@@ -214,19 +214,45 @@ def _execute_relay_steps(w3: Web3, acct, steps: list[dict], nonce_mgr: "_NonceMa
     return swap_hash or last_hash
 
 
-def _buy_usdy_best(w3: Web3, acct, usd: float, nonce_mgr: "_NonceManager") -> tuple[Optional[str], dict]:
-    """Buy USDY via the best route (Relay primary, Agni multi-hop fallback).
+def _execute_usdy_leg(w3: Web3, acct, q: dict, nonce_mgr: "_NonceManager") -> str:
+    """Sign ONE USDY-buy route (Relay steps or Agni multi-hop exactInput)."""
+    if q.get("route_kind") == "relay" and q.get("steps"):
+        h = _execute_relay_steps(w3, acct, q["steps"], nonce_mgr)
+        if not h:
+            raise RuntimeError("relay produced no swap step")
+        return h
+    return _buy_usdy(w3, acct, int(q["amount_in_wei"]), int(q["min_out"]), q["path"], nonce_mgr)
 
-    Returns ``(tx_hash, quote)``; ``tx_hash`` is None if no route is executable.
+
+def _buy_usdy_best(w3: Web3, acct, usd: float, nonce_mgr: "_NonceManager") -> tuple[Optional[str], dict]:
+    """Buy USDY via the best route with automatic fallback to the other route.
+
+    Quotes both (Relay + Agni), executes the better one, and if it reverts (STF,
+    "Return amount is not enough", timeout, …) automatically retries the OTHER
+    route with its OWN fresh quote. Returns ``(tx_hash, quote)`` where ``quote``
+    is annotated with the route actually used, the fallback (if any) and the
+    losing route's numbers; ``tx_hash`` is None if no route is executable.
     """
     q = routing.best_usdy_buy(w3, acct.address, usd)
     if not (q.get("ok") and float(q.get("exec_usdc") or 0) >= agni._MIN_LEG_USDC):
         return None, q
-    if q.get("route_kind") == "relay" and q.get("steps"):
-        tx = _execute_relay_steps(w3, acct, q["steps"], nonce_mgr)
-    else:
-        tx = _buy_usdy(w3, acct, int(q["amount_in_wei"]), int(q["min_out"]), q["path"], nonce_mgr)
-    return tx, q
+    try:
+        tx = _execute_usdy_leg(w3, acct, q, nonce_mgr)
+        q["route_used"] = q.get("route_kind")
+        return tx, q
+    except Exception as first_err:  # noqa: BLE001 - try the other route before giving up
+        other = "agni" if q.get("route_kind") == "relay" else "relay"
+        logger.warning("USDY %s route failed (%s) — auto-falling back to %s",
+                       q.get("route_kind"), str(first_err)[:140], other)
+        fb = routing.best_usdy_buy(w3, acct.address, usd, prefer=other)
+        fb["fallback_from"] = q.get("route_kind")
+        fb["fallback_reason"] = str(first_err)[:200]
+        if not (fb.get("ok") and fb.get("route_kind") == other
+                and float(fb.get("exec_usdc") or 0) >= agni._MIN_LEG_USDC):
+            raise
+        tx = _execute_usdy_leg(w3, acct, fb, nonce_mgr)
+        fb["route_used"] = other
+        return tx, fb
 
 
 def _slip(amount: float) -> float:
@@ -358,24 +384,29 @@ def execute_rebalance_swaps(
             spendable -= usd
 
     # USDY leg — real buy toward the target deficit via the best route (Relay
-    # primary, Agni multi-hop fallback), guardrailed by the soft impact cap.
+    # primary, Agni multi-hop fallback) with auto-fallback on revert, guardrailed
+    # by the soft impact cap.
     if tgt_usdy - cur_usdy > agni._MIN_LEG_USDC and spendable > agni._MIN_LEG_USDC:
-        q = routing.best_usdy_buy(w3, acct.address, min(tgt_usdy - cur_usdy, spendable))
-        if q.get("ok") and float(q.get("exec_usdc") or 0) >= agni._MIN_LEG_USDC:
-            try:
-                if q.get("route_kind") == "relay" and q.get("steps"):
-                    tx = _execute_relay_steps(w3, acct, q["steps"], nonce_mgr)
-                else:
-                    tx = _buy_usdy(w3, acct, int(q["amount_in_wei"]), int(q["min_out"]), q["path"], nonce_mgr)
+        try:
+            tx, q = _buy_usdy_best(w3, acct, min(tgt_usdy - cur_usdy, spendable), nonce_mgr)
+            if tx and q.get("ok"):
                 results.append({"from": "USDC", "to": "USDY", "usd": round(float(q["exec_usdc"]), 4),
-                                "tx_hash": tx, "status": "executed", "router": q.get("route_kind", "agni"),
+                                "tx_hash": tx, "status": "executed",
+                                "router": q.get("route_used") or q.get("route_kind", "agni"),
                                 "request_id": q.get("request_id", ""),
+                                "route_reason": q.get("chosen_reason", ""),
+                                "fallback_from": q.get("fallback_from", ""),
                                 "price_impact_bps": int(q["price_impact_bps"]), "capped": bool(q["capped"])})
-                logger.info("rebalance USDY buy $%.4f via %s impact=%dbps tx=%s", q["exec_usdc"], q.get("route_kind"), q["price_impact_bps"], tx)
+                logger.info("rebalance USDY buy $%.4f via %s impact=%dbps tx=%s | %s",
+                            q["exec_usdc"], q.get("route_used") or q.get("route_kind"),
+                            q["price_impact_bps"], tx, q.get("chosen_reason", ""))
                 spendable -= float(q["exec_usdc"])
-            except Exception as e:  # noqa: BLE001
-                results.append({"from": "USDC", "to": "USDY", "usd": round(float(q["exec_usdc"]), 4), "status": "failed", "error": str(e)[:200]})
-                logger.error("rebalance USDY buy failed: %s", e)
+            elif not tx:
+                results.append({"from": "USDC", "to": "USDY", "usd": 0.0, "status": "skipped",
+                                "reason": q.get("note") or "no executable route"})
+        except Exception as e:  # noqa: BLE001
+            results.append({"from": "USDC", "to": "USDY", "status": "failed", "error": str(e)[:200]})
+            logger.error("rebalance USDY buy failed (both routes): %s", e)
 
     if not results:
         results.append({"status": "skipped", "reason": "already balanced within thresholds"})
@@ -455,23 +486,25 @@ def execute_dca_slice(
     # guardrailed by QuoterV2 (soft price-impact cap). Any portion the thin pool
     # can't absorb within the cap stays as USDC and is flagged so the UI can label it.
     if usdy_held >= agni._MIN_LEG_USDC:
-        q = routing.best_usdy_buy(w3, acct.address, usdy_held)
-        if q.get("ok") and float(q.get("exec_usdc") or 0) >= agni._MIN_LEG_USDC:
-            try:
-                if q.get("route_kind") == "relay" and q.get("steps"):
-                    tx = _execute_relay_steps(w3, acct, q["steps"], nonce_mgr)
-                else:
-                    tx = _buy_usdy(w3, acct, int(q["amount_in_wei"]), int(q["min_out"]), q["path"], nonce_mgr)
-                results.append({
-                    "from": "USDC", "to": "USDY", "usd": round(float(q["exec_usdc"]), 4),
-                    "tx_hash": tx, "status": "executed", "router": q.get("route_kind", "agni"),
-                    "request_id": q.get("request_id", ""),
-                    "price_impact_bps": int(q["price_impact_bps"]), "capped": bool(q["capped"]),
-                })
-                logger.info("DCA USDY buy $%.4f via %s impact=%dbps tx=%s", q["exec_usdc"], q.get("route_kind"), q["price_impact_bps"], tx)
-            except Exception as e:  # noqa: BLE001
-                results.append({"from": "USDC", "to": "USDY", "usd": round(float(q["exec_usdc"]), 4), "status": "failed", "error": str(e)[:200]})
-                logger.error("DCA USDY buy failed: %s", e)
+        try:
+            tx, q = _buy_usdy_best(w3, acct, usdy_held, nonce_mgr)
+        except Exception as e:  # noqa: BLE001 - both routes reverted
+            tx, q = None, {"ok": False, "exec_usdc": 0.0, "held_usdc": usdy_held,
+                           "note": f"both routes failed: {str(e)[:160]}"}
+            logger.error("DCA USDY buy failed (both routes): %s", e)
+        if tx and q.get("ok"):
+            results.append({
+                "from": "USDC", "to": "USDY", "usd": round(float(q["exec_usdc"]), 4),
+                "tx_hash": tx, "status": "executed",
+                "router": q.get("route_used") or q.get("route_kind", "agni"),
+                "request_id": q.get("request_id", ""),
+                "route_reason": q.get("chosen_reason", ""),
+                "fallback_from": q.get("fallback_from", ""),
+                "price_impact_bps": int(q["price_impact_bps"]), "capped": bool(q["capped"]),
+            })
+            logger.info("DCA USDY buy $%.4f via %s impact=%dbps tx=%s | %s",
+                        q["exec_usdc"], q.get("route_used") or q.get("route_kind"),
+                        q["price_impact_bps"], tx, q.get("chosen_reason", ""))
             held = float(q.get("held_usdc") or 0.0)
             if held > 0:
                 results.append({"from": "USDC", "to": "USDY", "usd": round(held, 4), "status": "held_as_usdc", "note": q.get("note") or "limited by pool liquidity"})

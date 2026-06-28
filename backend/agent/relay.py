@@ -56,6 +56,10 @@ _USDY_UNIT = 10 ** USDY_DECIMALS
 
 USDY_MAX_PRICE_IMPACT_BPS = int(os.getenv("USDY_MAX_PRICE_IMPACT_BPS", "800"))
 DEFAULT_SLIPPAGE_BPS = int(os.getenv("DEFAULT_SLIPPAGE_BPS", "100"))
+# Dedicated, wider slippage for the thin USDY leg. Relay bakes a min-out
+# (``minimumAmount``) into the swap calldata from this tolerance; a tight 1% is
+# routinely unmet ("Return amount is not enough") on this pool, so default 3%.
+USDY_SLIPPAGE_BPS = int(os.getenv("USDY_SLIPPAGE_BPS", "300"))
 _MIN_LEG_USDC = float(os.getenv("USDY_MIN_LEG_USDC", "0.01"))
 _HTTP_TIMEOUT = float(os.getenv("RELAY_HTTP_TIMEOUT", "30"))
 
@@ -83,7 +87,7 @@ def _raw_quote(wallet: str, amount_in_wei: int) -> dict:
         "destinationCurrency": USDY_ADDRESS,
         "amount": str(int(amount_in_wei)),
         "tradeType": "EXACT_INPUT",
-        "slippageTolerance": str(DEFAULT_SLIPPAGE_BPS),
+        "slippageTolerance": str(USDY_SLIPPAGE_BPS),
     }
     return _http("POST", RELAY_QUOTE_URL, body)
 
@@ -165,20 +169,28 @@ def _fees_usd(q: dict) -> dict:
     }
 
 
-def quote_usdy_buy(wallet: str, requested_usdc: float) -> dict:
+def quote_usdy_buy(wallet: str, requested_usdc: float, max_in_wei: int | None = None) -> dict:
     """Plan a USDC->USDY buy via Relay for ``requested_usdc`` (soft impact cap).
 
     Returns a leg dict shaped like ``agni.quote_usdy_buy`` plus Relay execution
-    payload (``steps``, ``request_id``, ``check_endpoint``, ``fees``). Never
+    payload (``steps``, ``request_id``, ``check_endpoint``, ``fees``).
+    ``max_in_wei`` (when given) caps the input to the wallet's real USDC balance
+    so the swap step never tries to pull more USDC than the wallet holds. Never
     raises — any failure marks the route unavailable so the caller falls back.
     """
     requested_usdc = max(0.0, float(requested_usdc))
+    balance_clamped = False
+    if max_in_wei is not None:
+        cap_usdc = max(0.0, int(max_in_wei) / _USDC_UNIT)
+        if requested_usdc > cap_usdc:
+            requested_usdc = cap_usdc
+            balance_clamped = True
     base = {
         "ok": False, "side": "buy", "route_kind": "relay",
         "requested_usdc": round(requested_usdc, 6),
         "exec_usdc": 0.0, "held_usdc": round(requested_usdc, 6),
         "quote_usdy": 0.0, "min_out": "0", "amount_in_wei": "0",
-        "price_impact_bps": 0, "slippage_bps": DEFAULT_SLIPPAGE_BPS,
+        "price_impact_bps": 0, "slippage_bps": USDY_SLIPPAGE_BPS,
         "max_impact_bps": USDY_MAX_PRICE_IMPACT_BPS, "capped": False,
         "token_in": USDC_ADDRESS, "token_out": USDY_ADDRESS,
         "route_label": ROUTE_LABEL_BUY, "multihop": True,
@@ -192,7 +204,8 @@ def quote_usdy_buy(wallet: str, requested_usdc: float) -> dict:
         base["note"] = "relay needs a wallet address"
         return base
     if requested_usdc < _MIN_LEG_USDC:
-        base["note"] = "below dust floor"
+        base["note"] = ("insufficient USDC balance for the USDY leg"
+                        if balance_clamped else "below dust floor")
         return base
     try:
         exec_usdc = requested_usdc
@@ -228,6 +241,8 @@ def quote_usdy_buy(wallet: str, requested_usdc: float) -> dict:
         min_out = det.get("currencyOut", {}).get("minimumAmount") or "0"
         amount_in = det.get("currencyIn", {}).get("amount") or str(int(round(exec_usdc * _USDC_UNIT)))
         rid, ep = _check_endpoint(q)
+        if balance_clamped:
+            note = ((note + "; ") if note else "") + "input capped to wallet USDC balance"
         base.update({
             "ok": True,
             "exec_usdc": round(exec_usdc, 6),

@@ -325,14 +325,18 @@ async def strategy_plan(req: StrategyPlanRequest):
 
 
 @app.get("/api/strategy/usdy_quote")
-async def strategy_usdy_quote(amount_usdc: float = 0.0, side: str = "buy", wallet: str = ""):
+async def strategy_usdy_quote(amount_usdc: float = 0.0, side: str = "buy", wallet: str = "",
+                              prefer: str = ""):
     """Fresh pre-trade quote for the USDY layer, fetched right before signing.
 
     For "buy" it returns the **best route** (Relay primary, Agni multi-hop
     fallback) with the ready-to-sign execution payload: Relay ``steps`` +
     ``request_id`` or Agni ``path`` + ``min_out``, plus the honest ``routes``
-    comparison, price impact (bps) and fee breakdown. "sell" stays on Agni
-    (amount_usdc is interpreted as USDY).
+    comparison, price impact (bps) and fee breakdown. The input is capped to the
+    wallet's real USDC balance so the swap never reverts on a shortfall.
+    ``prefer`` ("relay"|"agni") forces a specific route — used by the frontend's
+    auto-fallback to retry the OTHER route with its own fresh quote. "sell" stays
+    on Agni (amount_usdc is interpreted as USDY).
     """
     from agent.portfolio_reader import _w3
     from agent import agni, routing
@@ -340,7 +344,8 @@ async def strategy_usdy_quote(amount_usdc: float = 0.0, side: str = "buy", walle
     w3 = await asyncio.to_thread(_w3)
     if side == "sell":
         return await asyncio.to_thread(agni.quote_usdy_sell, w3, amount_usdc)
-    return await asyncio.to_thread(routing.best_usdy_buy, w3, wallet, amount_usdc)
+    pref = prefer if prefer in ("relay", "agni") else None
+    return await asyncio.to_thread(routing.best_usdy_buy, w3, wallet, amount_usdc, pref)
 
 
 @app.get("/api/strategy/relay_status")

@@ -3051,6 +3051,9 @@ type UsdyQuoteResp = {
   request_id?: string;
   check_endpoint?: string;
   fees?: UsdyFees;
+  routes?: { relay?: UsdyRouteSummary; agni?: UsdyRouteSummary };
+  chosen_reason?: string;
+  note?: string;
 };
 type StrategyPlan = {
   regime: number;
@@ -3425,81 +3428,127 @@ export function AutopilotTabContent() {
         }
       }
 
-      // --- USDY leg — best route: Relay (primary) or Agni multi-hop (fallback) ---
-      // Re-quote fresh right before signing so the calldata/route is current.
+      // --- USDY leg — best route (Relay primary / Agni fallback) with auto-fallback ---
+      // Re-quote fresh right before signing so the calldata/route is current, and
+      // if the chosen route reverts, retry the OTHER route with its own fresh quote.
       let usdyHash: `0x${string}` | null = null;
       let usdyRouteUsed: string | null = null;
+      let usdyRouteReason: string | null = null;
       const planLeg = plan.usdy_leg;
-      if (planLeg && !planLeg.compliance_blocked && BigInt(planLeg.amount_usdc) > BigInt(0)) {
-        let ul: UsdyLeg = planLeg;
-        try {
-          const fr = await fetch(`${BACKEND_URL}/api/strategy/usdy_quote?side=buy&amount_usdc=${planLeg.est_usd}&wallet=${address}`);
-          if (fr.ok) {
-            const f = (await fr.json()) as UsdyQuoteResp;
-            if (f?.ok && Number(f.exec_usdc ?? 0) > 0) {
-              // Map the backend quote keys onto the leg shape the executor reads.
-              ul = {
-                ...planLeg,
-                route_kind: f.route_kind,
-                route_label: f.route_label ?? planLeg.route_label,
-                amount_usdc: f.amount_in_wei,
-                min_out: f.min_out,
-                est_usd: f.exec_usdc,
-                quote_usdy: f.quote_usdy,
-                price_impact_bps: f.price_impact_bps,
-                slippage_bps: f.slippage_bps ?? planLeg.slippage_bps,
-                path: f.path,
-                steps: f.steps,
-                request_id: f.request_id,
-                check_endpoint: f.check_endpoint,
-                fees: f.fees,
-              };
-            }
-          }
-        } catch { /* fall back to the plan's quote */ }
 
+      // Map a fresh /usdy_quote response onto the leg shape the executor reads.
+      const mapQuoteToLeg = (base: UsdyLeg, f: UsdyQuoteResp): UsdyLeg => ({
+        ...base,
+        route_kind: f.route_kind,
+        route_label: f.route_label ?? base.route_label,
+        amount_usdc: f.amount_in_wei,
+        min_out: f.min_out,
+        est_usd: f.exec_usdc,
+        quote_usdy: f.quote_usdy,
+        price_impact_bps: f.price_impact_bps,
+        slippage_bps: f.slippage_bps ?? base.slippage_bps,
+        path: f.path,
+        steps: f.steps,
+        request_id: f.request_id,
+        check_endpoint: f.check_endpoint,
+        fees: f.fees,
+        chosen_reason: f.chosen_reason,
+        note: f.note ?? base.note,
+      });
+
+      // Fetch a fresh best-route quote (optionally forcing a route for fallback).
+      const fetchUsdyQuote = async (usd: number, prefer?: "relay" | "agni"): Promise<UsdyQuoteResp | null> => {
         try {
-          if (ul.route_kind === "relay" && ul.steps && ul.steps.length) {
-            // Relay: sign each step (approve -> swap) verbatim, then poll fulfilment.
-            for (const st of ul.steps) {
-              setExecStep(st.id === "swap"
-                ? `Awaiting signature — buying USDY (${ul.route_label ?? "via Relay"}, ${(ul.price_impact_bps / 100).toFixed(2)}% impact)…`
-                : "Approve USDC for Relay (USDY)…");
-              const h = await walletClient.sendTransaction({
-                to: st.to as `0x${string}`,
-                data: st.data as `0x${string}`,
-                value: BigInt(st.value || "0"),
-                chain: mantleChain, account: address as `0x${string}`,
-              });
-              await pc.waitForTransactionReceipt({ hash: h, confirmations: 1 });
-              if (st.id === "swap") usdyHash = h;
-            }
-            if (ul.request_id) {
-              setExecStep("Confirming USDY fill on Relay…");
-              await pollRelayStatus(ul.request_id);
-            }
-            usdyRouteUsed = "Relay";
-            done.push("USDY (Relay)"); repHash = repHash ?? usdyHash;
-          } else if (ul.path) {
-            // Agni multi-hop fallback: USDC→USDT→USDY exactInput(path).
-            setExecStep("Approve USDC for Agni (USDY)…");
-            await ensureAllowance(AGNI_SWAP_ROUTER, BigInt(ul.amount_usdc));
-            setExecStep(`Awaiting signature — buying USDY (${ul.route_label ?? "USDC→USDT→USDY via Agni"}, ${(ul.price_impact_bps / 100).toFixed(2)}% impact)…`);
-            usdyHash = await walletClient.writeContract({
-              address: AGNI_SWAP_ROUTER as `0x${string}`, abi: SWAP_ROUTER_EXACT_INPUT_ABI,
-              functionName: "exactInput",
-              args: [{
-                path: ul.path as `0x${string}`, recipient: address as `0x${string}`, deadline,
-                amountIn: BigInt(ul.amount_usdc), amountOutMinimum: BigInt(ul.min_out),
-              }],
+          const url = `${BACKEND_URL}/api/strategy/usdy_quote?side=buy&amount_usdc=${usd}&wallet=${address}${prefer ? `&prefer=${prefer}` : ""}`;
+          const fr = await fetch(url);
+          if (!fr.ok) return null;
+          const f = (await fr.json()) as UsdyQuoteResp;
+          return f?.ok && Number(f.exec_usdc ?? 0) > 0 ? f : null;
+        } catch { return null; }
+      };
+
+      // Execute one concrete route leg; throws on revert so the caller can fall back.
+      const execOneUsdyRoute = async (ul: UsdyLeg): Promise<`0x${string}`> => {
+        // Pre-sign balance check — never sign a swap the wallet can't cover (avoids STF).
+        const bal = await pc.readContract({
+          address: USDC_MANTLE as `0x${string}`, abi: ERC20_BALANCE_ABI,
+          functionName: "balanceOf", args: [address as `0x${string}`],
+        }) as bigint;
+        if (bal < BigInt(ul.amount_usdc)) {
+          throw new Error(`insufficient USDC balance (have ${(Number(bal) / 1e6).toFixed(4)}, need ${(Number(ul.amount_usdc) / 1e6).toFixed(4)})`);
+        }
+        if (ul.route_kind === "relay" && ul.steps && ul.steps.length) {
+          let swapHash: `0x${string}` | null = null;
+          for (const st of ul.steps) {
+            setExecStep(st.id === "swap"
+              ? `Awaiting signature — buying USDY (${ul.route_label ?? "via Relay"}, ${(ul.price_impact_bps / 100).toFixed(2)}% impact)…`
+              : "Approve USDC for Relay (USDY)…");
+            const h = await walletClient.sendTransaction({
+              to: st.to as `0x${string}`,
+              data: st.data as `0x${string}`,
+              value: BigInt(st.value || "0"),
               chain: mantleChain, account: address as `0x${string}`,
             });
-            await pc.waitForTransactionReceipt({ hash: usdyHash, confirmations: 1 });
-            usdyRouteUsed = "Agni"; done.push("USDY (Agni)"); repHash = repHash ?? usdyHash;
+            await pc.waitForTransactionReceipt({ hash: h, confirmations: 1 });
+            if (st.id === "swap") swapHash = h;
           }
+          if (ul.request_id) {
+            setExecStep("Confirming USDY fill on Relay…");
+            await pollRelayStatus(ul.request_id);
+          }
+          if (!swapHash) throw new Error("relay produced no swap step");
+          return swapHash;
+        }
+        if (ul.path) {
+          // Agni multi-hop: approve USDC to the EXACT Agni router used in the swap.
+          setExecStep("Approve USDC for Agni (USDY)…");
+          await ensureAllowance(AGNI_SWAP_ROUTER, BigInt(ul.amount_usdc));
+          setExecStep(`Awaiting signature — buying USDY (${ul.route_label ?? "USDC→USDT→USDY via Agni"}, ${(ul.price_impact_bps / 100).toFixed(2)}% impact)…`);
+          const h = await walletClient.writeContract({
+            address: AGNI_SWAP_ROUTER as `0x${string}`, abi: SWAP_ROUTER_EXACT_INPUT_ABI,
+            functionName: "exactInput",
+            args: [{
+              path: ul.path as `0x${string}`, recipient: address as `0x${string}`, deadline,
+              amountIn: BigInt(ul.amount_usdc), amountOutMinimum: BigInt(ul.min_out),
+            }],
+            chain: mantleChain, account: address as `0x${string}`,
+          });
+          await pc.waitForTransactionReceipt({ hash: h, confirmations: 1 });
+          return h;
+        }
+        throw new Error("no executable route payload");
+      };
+
+      if (planLeg && !planLeg.compliance_blocked && BigInt(planLeg.amount_usdc) > BigInt(0)) {
+        // Fresh best-of-two quote; fall back to the plan's quote only if the fetch fails.
+        const f0 = await fetchUsdyQuote(planLeg.est_usd);
+        let ul: UsdyLeg = f0 ? mapQuoteToLeg(planLeg, f0) : planLeg;
+        usdyRouteReason = ul.chosen_reason ?? planLeg.chosen_reason ?? null;
+        const primaryKind: "relay" | "agni" = ul.route_kind === "relay" ? "relay" : "agni";
+        const otherKind: "relay" | "agni" = primaryKind === "relay" ? "agni" : "relay";
+        try {
+          usdyHash = await execOneUsdyRoute(ul);
+          usdyRouteUsed = primaryKind === "relay" ? "Relay" : "Agni";
+          done.push(`USDY (${usdyRouteUsed})`); repHash = repHash ?? usdyHash;
         } catch (e: any) {
           if (isReject(e)) throw e;
-          skipped.push(`USDY (${ul.route_kind === "relay" ? "Relay" : "Agni"} swap failed)`);
+          // Auto-fallback: retry the OTHER route with its own fresh quote.
+          setExecStep(`USDY ${primaryKind} route failed — trying ${otherKind}…`);
+          const fb = await fetchUsdyQuote(planLeg.est_usd, otherKind);
+          if (fb && fb.route_kind === otherKind) {
+            const ul2 = mapQuoteToLeg(planLeg, fb);
+            try {
+              usdyHash = await execOneUsdyRoute(ul2);
+              usdyRouteUsed = otherKind === "relay" ? "Relay" : "Agni";
+              usdyRouteReason = `fallback ${primaryKind}→${otherKind}: ${fb.chosen_reason ?? ""}`.trim();
+              done.push(`USDY (${usdyRouteUsed}, fallback)`); repHash = repHash ?? usdyHash;
+            } catch (e2: any) {
+              if (isReject(e2)) throw e2;
+              skipped.push(`USDY (both routes failed: ${primaryKind}+${otherKind})`);
+            }
+          } else {
+            skipped.push(`USDY (${primaryKind} failed, no ${otherKind} fallback — insufficient liquidity)`);
+          }
         }
       }
 
@@ -3519,7 +3568,10 @@ export function AutopilotTabContent() {
             w_stocks: plan.weights_bps.xstocks,
             w_usdy: plan.weights_bps.usdy,
             w_meth: plan.weights_bps.meth,
-            reason: plan.reason,
+            // Append the chosen USDY route + comparison so the on-chain record is auditable.
+            reason: usdyRouteUsed
+              ? `${plan.reason} | USDY via ${usdyRouteUsed}${usdyRouteReason ? ` (${usdyRouteReason})` : ""}`
+              : plan.reason,
             tx_hash: repHash,
           }),
         });

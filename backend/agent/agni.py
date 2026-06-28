@@ -67,8 +67,12 @@ USDY_HOP2_FEE = int(os.getenv("USDY_HOP2_FEE", "100"))   # USDT/USDY pool
 # Soft, configurable price-impact cap. Within it -> full target; above it the leg
 # is shrunk by binary search and the remainder flagged (never silently held).
 USDY_MAX_PRICE_IMPACT_BPS = int(os.getenv("USDY_MAX_PRICE_IMPACT_BPS", "800"))
-# Slippage on amountOutMinimum, computed from the QuoterV2 quote.
+# Slippage on amountOutMinimum. The USDY pool is thin, so a tight 1% min-out is
+# routinely unmet ("Return amount is not enough" / "Too little received") when the
+# pool moves between quote and execution. The USDY leg therefore uses its OWN,
+# wider tolerance (default 3%) instead of the generic DEFAULT_SLIPPAGE_BPS (1%).
 DEFAULT_SLIPPAGE_BPS = int(os.getenv("DEFAULT_SLIPPAGE_BPS", "100"))
+USDY_SLIPPAGE_BPS = int(os.getenv("USDY_SLIPPAGE_BPS", "300"))
 # Dust floor: don't bother with legs smaller than this (USDC or USDC-equivalent).
 _MIN_LEG_USDC = float(os.getenv("USDY_MIN_LEG_USDC", "0.01"))
 # Probe size used to estimate the marginal (spot) rate without state change.
@@ -178,30 +182,40 @@ def _largest_under_cap(w3: Web3, path: bytes, requested: float, spot: float,
     return lo
 
 
-def quote_usdy_buy(w3: Web3, requested_usdc: float) -> dict:
+def quote_usdy_buy(w3: Web3, requested_usdc: float, max_in_wei: Optional[int] = None) -> dict:
     """Plan a USDC->USDT->USDY buy for the requested amount (soft impact cap).
 
     Returns a dict describing the swap:
         ok, requested_usdc, exec_usdc, held_usdc (0 unless capped/no-pool),
         quote_usdy, min_out_wei, amount_in_wei, price_impact_bps, slippage_bps,
         capped, path, route, route_label, multihop, note.
+    ``max_in_wei`` (when given) hard-caps the input to the wallet's real USDC
+    balance so ``exactInput`` never reverts ``STF`` on a balance shortfall — the
+    most common live failure when an earlier leg already spent some USDC.
     Never raises — a failed quote (no route / revert) marks the leg non-tradable so
     the caller can skip it and keep the rest as USDC.
     """
     requested_usdc = max(0.0, float(requested_usdc))
+    balance_clamped = False
+    if max_in_wei is not None:
+        cap_usdc = max(0.0, int(max_in_wei) / _USDC_UNIT)
+        if requested_usdc > cap_usdc:
+            requested_usdc = cap_usdc
+            balance_clamped = True
     path = _buy_path()
     base = {
         "ok": False, "side": "buy", "requested_usdc": round(requested_usdc, 6),
         "exec_usdc": 0.0, "held_usdc": round(requested_usdc, 6),
         "quote_usdy": 0.0, "min_out_wei": "0", "amount_in_wei": "0",
-        "price_impact_bps": 0, "slippage_bps": DEFAULT_SLIPPAGE_BPS, "capped": False,
+        "price_impact_bps": 0, "slippage_bps": USDY_SLIPPAGE_BPS, "capped": False,
         "router": AGNI_SWAP_ROUTER, "token_in": USDC_ADDRESS, "token_out": USDY_ADDRESS,
         "path": "0x" + path.hex(), "multihop": True,
         "route": "USDC->USDT->USDY", "route_label": ROUTE_LABEL_BUY,
         "max_impact_bps": USDY_MAX_PRICE_IMPACT_BPS, "note": "",
     }
     if requested_usdc < _MIN_LEG_USDC:
-        base["note"] = "below dust floor"
+        base["note"] = ("insufficient USDC balance for the USDY leg"
+                        if balance_clamped else "below dust floor")
         return base
     try:
         spot = _spot_usdy_per_usdc(w3, path)
@@ -221,13 +235,22 @@ def quote_usdy_buy(w3: Web3, requested_usdc: float) -> dict:
         if quote_usdy <= 0:
             base["note"] = "route unavailable — no USDY output quoted"
             return base
-        min_out_wei = int(quote_usdy * _USDY_UNIT * (10000 - DEFAULT_SLIPPAGE_BPS) / 10000)
+        min_out_wei = int(quote_usdy * _USDY_UNIT * (10000 - USDY_SLIPPAGE_BPS) / 10000)
+        amount_in_wei = int(round(exec_usdc * _USDC_UNIT))
+        # Hard safety clamp: never let float rounding push amount_in above balance.
+        if max_in_wei is not None and amount_in_wei > int(max_in_wei):
+            amount_in_wei = int(max_in_wei)
+            exec_usdc = amount_in_wei / _USDC_UNIT
+        if note and balance_clamped:
+            note = (note + "; ").strip()
+        if balance_clamped:
+            note = (note + "input capped to wallet USDC balance").strip()
         base.update({
             "ok": True, "exec_usdc": round(exec_usdc, 6),
             "held_usdc": round(max(0.0, requested_usdc - exec_usdc), 6),
             "quote_usdy": round(quote_usdy, 8), "min_out_wei": str(min_out_wei),
-            "amount_in_wei": str(int(round(exec_usdc * _USDC_UNIT))),
-            "price_impact_bps": impact_bps, "slippage_bps": DEFAULT_SLIPPAGE_BPS,
+            "amount_in_wei": str(amount_in_wei),
+            "price_impact_bps": impact_bps, "slippage_bps": USDY_SLIPPAGE_BPS,
             "capped": capped, "note": note,
         })
         return base
@@ -245,7 +268,7 @@ def quote_usdy_sell(w3: Web3, requested_usdy: float) -> dict:
         "ok": False, "side": "sell", "requested_usdy": round(requested_usdy, 8),
         "exec_usdy": 0.0, "held_usdy": round(requested_usdy, 8), "quote_usdc": 0.0,
         "min_out_wei": "0", "amount_in_wei": "0",
-        "price_impact_bps": 0, "slippage_bps": DEFAULT_SLIPPAGE_BPS, "capped": False,
+        "price_impact_bps": 0, "slippage_bps": USDY_SLIPPAGE_BPS, "capped": False,
         "router": AGNI_SWAP_ROUTER, "token_in": USDY_ADDRESS, "token_out": USDC_ADDRESS,
         "path": "0x" + path.hex(), "multihop": True,
         "route": "USDY->USDT->USDC", "route_label": ROUTE_LABEL_SELL,
@@ -270,13 +293,13 @@ def quote_usdy_sell(w3: Web3, requested_usdy: float) -> dict:
         if quote_usdc <= 0:
             base["note"] = "route unavailable — no USDC output quoted"
             return base
-        min_out_wei = int(quote_usdc * _USDC_UNIT * (10000 - DEFAULT_SLIPPAGE_BPS) / 10000)
+        min_out_wei = int(quote_usdc * _USDC_UNIT * (10000 - USDY_SLIPPAGE_BPS) / 10000)
         base.update({
             "ok": True, "exec_usdy": round(exec_usdy, 8),
             "held_usdy": round(max(0.0, requested_usdy - exec_usdy), 8),
             "quote_usdc": round(quote_usdc, 6), "min_out_wei": str(min_out_wei),
             "amount_in_wei": str(int(round(exec_usdy * _USDY_UNIT))),
-            "price_impact_bps": impact_bps, "slippage_bps": DEFAULT_SLIPPAGE_BPS,
+            "price_impact_bps": impact_bps, "slippage_bps": USDY_SLIPPAGE_BPS,
             "capped": capped, "note": note,
         })
         return base
