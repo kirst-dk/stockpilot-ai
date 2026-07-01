@@ -10,13 +10,20 @@
     "backend": "cd backend && python main.py",
     "frontend": "cd frontend && npm run dev"
   },
-  "keywords": ["mantle", "xstocks", "ai", "rwa", "defi", "tokenized-equities"],
+  "keywords": [
+    "mantle",
+    "xstocks",
+    "ai",
+    "rwa",
+    "defi",
+    "tokenized-equities"
+  ],
   "license": "MIT",
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
     "hardhat": "^2.19.0"
   },
   "dependencies": {
-    "@openzeppelin/contracts": "^5.0.0"
+    "@openzeppelin/contracts": "^5.0.2"
   }
 }

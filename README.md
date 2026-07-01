@@ -21,7 +21,7 @@ StockPilot AI is an autonomous AI agent that manages portfolios of tokenized equ
 - **Cross-Chain Bridge** — Relay.link SwapWidget integrated on-page across 65+ EVM networks (no external redirects)
 - **AI-Driven Portfolio Management** — Three strategies (Balanced Growth, Momentum, Value Investing) with LLM-enhanced analysis
 - **Stocky AI assistant** — floating concierge (Nansen + ELFA + AltLLM, tool-calling chat) available on every route
-- **On-Chain Transparency** — Agent actions (buy/sell/rebalance) recorded on Mantle smart contracts; ERC-8004 agent identity NFT
+- **On-Chain Transparency** — Agent actions (buy/sell/rebalance) recorded on Mantle smart contracts; **ERC-8004 agent identity NFT** ([deployed & verified](https://mantlescan.xyz/address/0x98611629c106FCf8Dc35A28a2db3a59638DB237a#code), agentId 1) with on-chain reputation + verifiable-AI rationale anchoring
 - **AI Analysis** — Nansen (on-chain analytics) + ELFA AI (market intelligence) + AltLLM (portfolio analysis)
 - **Fully mobile responsive** — hamburger menu + bottom navigation bar, no horizontal scroll (tested at 400px)
 - **Premium 3D landing** — real-time Three.js / WebGL hero with an infinite xStock token stream and a rich `prefers-reduced-motion` fallback
@@ -174,6 +174,7 @@ stockpilot-ai/
 |----------|---------|---------|
 | StockPilotAgent (Autopilot) | Mantle Mainnet | [`0xbbE80ACe5c46b49930ff0229762a1A57BE4CA6F4`](https://mantlescan.xyz/address/0xbbE80ACe5c46b49930ff0229762a1A57BE4CA6F4) |
 | XStockSwapHelper | Mantle Mainnet | [`0xe2c17E812f506e1A2723618e787eE61B9E30470f`](https://mantlescan.xyz/address/0xe2c17E812f506e1A2723618e787eE61B9E30470f) |
+| StockPilotAgentIdentity (ERC-8004 identity + reputation + rationale anchor) | Mantle Mainnet | [`0x98611629c106FCf8Dc35A28a2db3a59638DB237a`](https://mantlescan.xyz/address/0x98611629c106FCf8Dc35A28a2db3a59638DB237a#code) |
 | USDY (Ondo, protection layer) | Mantle Mainnet | [`0x5bE26527e817998A7206475496fDE1E68957c5A6`](https://mantlescan.xyz/address/0x5bE26527e817998A7206475496fDE1E68957c5A6) |
 | mETH (yield layer) | Mantle Mainnet | [`0xcDA86A272531e8640cD7F1a92c01839911B90bb0`](https://mantlescan.xyz/address/0xcDA86A272531e8640cD7F1a92c01839911B90bb0) |
 | Fluxion V3 QuoterV2 | Mantle | [`0x3E4eE18Ac7280813236a1EB850679Da5322E14CE`](https://mantlescan.xyz/address/0x3E4eE18Ac7280813236a1EB850679Da5322E14CE) |
@@ -286,6 +287,8 @@ The "Turing test" premise of the track is that an AI agent's track record should
 - Writes the regime, the three-layer target weights, the live signal values, and a human-readable `reason` on-chain via `recordDecision` → permanently queryable on [Mantlescan](https://mantlescan.xyz/address/0xbbE80ACe5c46b49930ff0229762a1A57BE4CA6F4).
 - Records in `reason` **which feeds were live vs fallback** (Nansen / ELFA / AltLLM / USDY oracle) and the numeric signal values, so an auditor can tell genuine market input from defaults (no more constant `+1.00 / +1.00`).
 - Is reproducible: the regime→allocation mapping and guardrails are deterministic given the recorded signals, so anyone can re-derive the weights the agent chose.
+- **Anchors a `keccak256` hash of the full AI rationale** on the [ERC-8004 identity contract](https://mantlescan.xyz/address/0x98611629c106FCf8Dc35A28a2db3a59638DB237a#code) via `anchorRationale(decisionRef, rationaleHash)`. Anyone can call `verifyRationale(reason)` and get `MATCH`, proving the reasoning shown in the UI is exactly what the agent committed on-chain — verifiable AI, not a black box.
+- **ERC-8004 agent identity**: the agent holds identity NFT #1 (`agentId 1`) on-chain; its reputation (decisions recorded, rationales anchored, feedback score) accrues on the same registry, so the track record is the agent's own, not a self-reported claim.
 
 ## Business Model, Tokenomics & GTM
 

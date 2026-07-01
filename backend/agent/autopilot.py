@@ -47,6 +47,11 @@ STOCKPILOT_CONTRACT_ADDRESS = os.getenv(
 )
 AGENT_PRIVATE_KEY = os.getenv("AGENT_PRIVATE_KEY") or os.getenv("DEPLOYER_PRIVATE_KEY")
 
+# ERC-8004-style agent identity + reputation + verifiable-AI rationale anchor.
+AGENT_IDENTITY_ADDRESS = os.getenv(
+    "AGENT_IDENTITY_ADDRESS", "0x98611629c106FCf8Dc35A28a2db3a59638DB237a"
+)
+
 # Three-layer tokens on Mantle.
 USDY_TOKEN = os.getenv("USDY_TOKEN_ADDRESS", "0x5bE26527e817998A7206475496fDE1E68957c5A6")
 METH_TOKEN = os.getenv("METH_TOKEN_ADDRESS", "0xcDA86A272531e8640cD7F1a92c01839911B90bb0")
@@ -88,6 +93,27 @@ AGENT_ABI = [
     },
     {
         "name": "getDecisionCount",
+        "type": "function",
+        "stateMutability": "view",
+        "inputs": [],
+        "outputs": [{"name": "", "type": "uint256"}],
+    },
+]
+
+# Minimal ABI for the ERC-8004 identity contract's rationale anchor.
+IDENTITY_ABI = [
+    {
+        "name": "anchorRationale",
+        "type": "function",
+        "stateMutability": "nonpayable",
+        "inputs": [
+            {"name": "decisionRef", "type": "uint256"},
+            {"name": "rationaleHash", "type": "bytes32"},
+        ],
+        "outputs": [{"name": "anchorIndex", "type": "uint256"}],
+    },
+    {
+        "name": "getAnchorCount",
         "type": "function",
         "stateMutability": "view",
         "inputs": [],
@@ -172,6 +198,8 @@ class DecisionRecord:
     tx_hash: Optional[str]
     simulated: bool
     portfolio: Optional[dict] = None  # real on-chain holdings snapshot (live cycles)
+    rationale_hash: Optional[str] = None  # keccak256(reason) committed on-chain (ERC-8004 anchor)
+    anchor_tx_hash: Optional[str] = None  # tx that anchored the rationale hash on the identity contract
 
 
 # --- Signal gathering ---
@@ -615,6 +643,66 @@ def record_decision_onchain(
         return None
 
 
+def _read_decision_count() -> int:
+    """Read StockPilotAgent.getDecisionCount() so we can reference the just-recorded decision."""
+    w3 = Web3(Web3.HTTPProvider(MANTLE_RPC_URL, request_kwargs={"timeout": 15}))
+    contract = w3.eth.contract(
+        address=Web3.to_checksum_address(STOCKPILOT_CONTRACT_ADDRESS), abi=AGENT_ABI
+    )
+    return int(contract.functions.getDecisionCount().call())
+
+
+def anchor_rationale_onchain(decision_ref: int, reason: str) -> tuple[Optional[str], Optional[str]]:
+    """Anchor keccak256(reason) on the ERC-8004 identity contract. Returns (rationale_hash, tx_hash).
+
+    This is the verifiable-AI step: the exact rationale the UI shows is hashed and committed
+    on-chain next to the decision, so anyone can later call ``verifyRationale(reason)`` and get
+    MATCH. Runs synchronously (web3); callers should offload via ``asyncio.to_thread``.
+    """
+    if not AGENT_PRIVATE_KEY or not AGENT_IDENTITY_ADDRESS:
+        return None, None
+    try:
+        w3 = Web3(Web3.HTTPProvider(MANTLE_RPC_URL, request_kwargs={"timeout": 30}))
+        acct = w3.eth.account.from_key(AGENT_PRIVATE_KEY)
+        rationale_hash = Web3.keccak(text=reason)
+        contract = w3.eth.contract(
+            address=Web3.to_checksum_address(AGENT_IDENTITY_ADDRESS), abi=IDENTITY_ABI
+        )
+        nonce = w3.eth.get_transaction_count(acct.address, "pending")
+        last_err: Optional[Exception] = None
+        for _attempt in range(6):
+            tx = contract.functions.anchorRationale(int(decision_ref), rationale_hash).build_transaction({
+                "from": acct.address,
+                "nonce": nonce,
+                "gas": 200000,
+                "gasPrice": w3.eth.gas_price,
+                "chainId": 5000,
+            })
+            signed = acct.sign_transaction(tx)
+            raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
+            try:
+                tx_hash = w3.eth.send_raw_transaction(raw)
+            except Exception as send_err:  # noqa: BLE001
+                last_err = send_err
+                suggested = _parse_next_nonce(str(send_err))
+                nonce = suggested if (suggested is not None and suggested != nonce) else nonce + 1
+                continue
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+            h = receipt.transactionHash.hex()
+            if not h.startswith("0x"):
+                h = "0x" + h
+            hh = rationale_hash.hex()
+            if not hh.startswith("0x"):
+                hh = "0x" + hh
+            logger.info("anchorRationale tx mined: %s (status=%s)", h, receipt.status)
+            return hh, h
+        logger.error("On-chain anchorRationale failed after retries: %s", last_err)
+        return None, None
+    except Exception as e:  # noqa: BLE001
+        logger.error("On-chain anchorRationale failed: %s", e)
+        return None, None
+
+
 # --- The agent ---
 
 class AutopilotAgent:
@@ -666,6 +754,8 @@ class AutopilotAgent:
             "next_run_ts": self.next_run_ts,
             "live_swaps": LIVE_SWAPS,
             "contract": STOCKPILOT_CONTRACT_ADDRESS,
+            "identity_contract": AGENT_IDENTITY_ADDRESS,
+            "agent_id": 1,
             "agent_wallet": self.agent_address(),
             "agent_funded": self._funded_flag(),
             "last_decision": self.last_decision,
@@ -738,8 +828,21 @@ class AutopilotAgent:
                 )
 
             tx_hash = None
+            rationale_hash = None
+            anchor_tx_hash = None
             if record:
                 tx_hash = await asyncio.to_thread(record_decision_onchain, regime, layers, reason)
+                if tx_hash:
+                    # Anchor keccak256(reason) on the ERC-8004 identity contract so the
+                    # rationale is independently verifiable (verifiable AI, not a black box).
+                    try:
+                        decision_ref = await asyncio.to_thread(_read_decision_count)
+                        decision_ref = max(0, decision_ref - 1)
+                    except Exception:  # noqa: BLE001
+                        decision_ref = 0
+                    rationale_hash, anchor_tx_hash = await asyncio.to_thread(
+                        anchor_rationale_onchain, decision_ref, reason
+                    )
 
             rec = DecisionRecord(
                 ts=int(time.time()),
@@ -755,6 +858,8 @@ class AutopilotAgent:
                 tx_hash=tx_hash,
                 simulated=simulated,
                 portfolio=portfolio_snapshot,
+                rationale_hash=rationale_hash,
+                anchor_tx_hash=anchor_tx_hash,
             )
             decision = asdict(rec)
             self.last_decision = decision
