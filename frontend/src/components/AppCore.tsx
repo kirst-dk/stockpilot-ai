@@ -39,6 +39,8 @@ const BRIDGE_DEFAULT_TO = {
 };
 
 const CONTRACT = "0xbbE80ACe5c46b49930ff0229762a1A57BE4CA6F4";
+// ERC-8004 agent identity + reputation + verifiable-AI rationale anchor (Mantle Mainnet)
+const IDENTITY_CONTRACT = "0x98611629c106FCf8Dc35A28a2db3a59638DB237a";
 // RWA / AI Yield Optimizer (USDY) — Mantle Mainnet addresses
 const USDY_ORACLE = "0xA96abbe61AfEdEB0D14a20440Ae7100D9aB4882f";
 const USDY_TOKEN = "0x5bE26527e817998A7206475496fDE1E68957c5A6";
@@ -2950,6 +2952,9 @@ type AutopilotStatus = {
   next_run_ts: number | null;
   live_swaps: boolean;
   contract: string;
+  identity_contract?: string;
+  agent_id?: number;
+  agent_wallet?: string | null;
   agent_funded: boolean;
   last_decision: any | null;
   decision_count: number;
@@ -4066,8 +4071,17 @@ export function AutopilotTabContent() {
             })}
           </div>
         )}
-        <div className="mt-3 text-[9px] font-mono text-white/30 break-all">
-          Contract: <a href={`https://mantlescan.xyz/address/${CONTRACT}`} target="_blank" rel="noreferrer" className="hover:text-white/60">{CONTRACT}</a>
+        <div className="mt-3 space-y-1.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border border-violet-500/30 bg-violet-500/10 text-violet-200">ERC-8004 Identity #1</span>
+            <span className="text-[9px] text-white/35">on-chain agent identity + reputation + verifiable-AI rationale anchor</span>
+          </div>
+          <div className="text-[9px] font-mono text-white/30 break-all">
+            Agent: <a href={`https://mantlescan.xyz/address/${CONTRACT}`} target="_blank" rel="noreferrer" className="hover:text-white/60">{CONTRACT}</a>
+          </div>
+          <div className="text-[9px] font-mono text-white/30 break-all">
+            Identity: <a href={`https://mantlescan.xyz/address/${IDENTITY_CONTRACT}#code`} target="_blank" rel="noreferrer" className="hover:text-violet-300">{IDENTITY_CONTRACT}</a>
+          </div>
         </div>
       </div>
     </div>
