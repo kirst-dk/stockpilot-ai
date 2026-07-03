@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StockPilot AI — Autonomous Portfolio Manager for Tokenized Equities on Mantle</title>
+  <meta name="description" content="StockPilot AI is an autonomous AI agent that manages portfolios of 155 tokenized equities (xStocks) on Mantle — AI strategies, Fluxion swaps, Relay bridge, and on-chain transparency." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230C1A32'/%3E%3Ctext x='50' y='72' font-size='62' text-anchor='middle' font-family='Georgia,serif' fill='%23FF6B35'%3ES%3C/text%3E%3C/svg%3E" />
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Abril+Fatface&family=Nunito:ital,wght@0,300;0,400;0,600;0,700;1,400&family=B612+Mono:ital,wght@0,400;0,700;1,400&display=swap');
+
+    /* ===== CSS CUSTOM PROPERTIES (cosmobooks warm-cosmos palette) ===== */
+    :root {
+      --bg-primary: #0C1A32;
+      --bg-secondary: #1A2E5A;
+      --text-primary: #F5F0E0;
+      --text-muted: #8BAAD4;
+      --accent-orange: #FF6B35;
+      --accent-lime: #A8E63A;
+      --accent-gold: #F5C842;
+      --surface: #1D3464;
+      --green-up: #A8E63A;
+      --red-down: #FF6B6B;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Nunito', sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      overflow-x: hidden;
+      line-height: 1.6;
+    }
+    img { display: block; max-width: 100%; }
+    a { color: inherit; text-decoration: none; }
+    button { cursor: pointer; font-family: inherit; border: none; }
+
+    /* ===== STAR FIELD ===== */
+    .star-field { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+    .star {
+      position: absolute; border-radius: 50%; background: var(--text-primary);
+      animation: twinkle var(--dur, 3s) ease-in-out var(--delay, 0s) infinite;
+    }
+    @keyframes twinkle {
+      0%, 100% { opacity: var(--min-op, 0.1); }
+      50% { opacity: var(--max-op, 0.8); }
+    }
+
+    /* ===== NAVIGATION ===== */
+    .nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 1.2rem 3rem;
+      background: linear-gradient(to bottom, rgba(12,26,50,0.95) 0%, rgba(12,26,50,0) 100%);
+      pointer-events: none;
+    }
+    .nav-logo {
+      font-family: 'Abril Fatface', serif; font-size: 1.6rem;
+      color: var(--text-primary); letter-spacing: 0.02em; pointer-events: all;
+    }
+    .nav-logo span { color: var(--accent-orange); }
+    .nav-links { display: flex; align-items: center; gap: 2.5rem; list-style: none; pointer-events: all; }
+    .nav-links a {
+      font-weight: 600; font-size: 0.95rem; color: var(--text-muted);
+      transition: color 200ms ease; letter-spacing: 0.04em; text-transform: uppercase;
+    }
+    .nav-links a:hover { color: var(--text-primary); }
+    .nav-cta {
+      font-weight: 700; font-size: 0.95rem; background: var(--accent-orange);
+      color: #fff; padding: 0.6rem 1.5rem; border-radius: 100px;
+      transition: transform 200ms ease, background 200ms ease; pointer-events: all;
+    }
+    .nav-cta:hover { background: #ff5520; transform: translateY(-1px); }
+
+    /* ===== HERO ===== */
+    .hero {
+      position: relative; width: 100%; height: 100vh; min-height: 640px;
+      overflow: hidden; background: var(--bg-primary);
+    }
+    .hero-rows {
+      position: absolute; inset: 0; z-index: 1;
+      display: flex; flex-direction: column; gap: 10px; padding: 10px;
+      opacity: 0; transition: opacity 900ms ease;
+    }
+    .hero-rows.visible { opacity: 1; }
+    .hero-row { flex: 1 1 0; min-height: 0; overflow: hidden; display: flex; align-items: stretch; }
+    .hero-row-track {
+      display: flex; gap: 10px; flex: 0 0 auto; height: 100%;
+      will-change: transform;
+    }
+    .hero-row.left .hero-row-track { animation: marqueeL var(--dur, 60s) linear infinite; }
+    .hero-row.right .hero-row-track { animation: marqueeR var(--dur, 60s) linear infinite; }
+    @keyframes marqueeL { from { transform: translate3d(0,0,0); } to { transform: translate3d(-50%,0,0); } }
+    @keyframes marqueeR { from { transform: translate3d(-50%,0,0); } to { transform: translate3d(0,0,0); } }
+    .hero-tile {
+      position: relative; overflow: hidden; border-radius: 14px;
+      background: var(--surface); height: 100%; aspect-ratio: 1 / 1; flex: 0 0 auto;
+      display: flex; align-items: center; justify-content: center;
+      will-change: transform; cursor: pointer;
+      transition: transform 260ms cubic-bezier(0.2,0.8,0.2,1), box-shadow 260ms ease, filter 260ms ease;
+      box-shadow: inset 0 0 0 1px rgba(245,240,224,0.06);
+    }
+    .hero-tile img {
+      width: 56%; height: 56%; object-fit: contain;
+      filter: drop-shadow(0 4px 14px rgba(0,0,0,0.5));
+    }
+    .hero-tile::after {
+      content: attr(data-tk);
+      position: absolute; bottom: 7px; left: 0; right: 0; text-align: center;
+      font-family: 'B612 Mono', monospace; font-size: 0.6rem; letter-spacing: 0.08em;
+      color: var(--text-muted); opacity: 0; transition: opacity 200ms ease;
+    }
+    .hero-tile:hover::after { opacity: 1; }
+    .hero-tile:hover {
+      transform: scale(1.12); z-index: 6;
+      filter: brightness(1.18);
+      box-shadow: 0 14px 40px rgba(0,0,0,0.55), inset 0 0 0 2px rgba(245,200,66,0.7);
+    }
+
+    .hero-vignette {
+      position: absolute; inset: 0; z-index: 2; pointer-events: none;
+      background:
+        radial-gradient(ellipse at center, rgba(12,26,50,0.55) 30%, rgba(12,26,50,0.93) 100%),
+        linear-gradient(to bottom, rgba(12,26,50,0.7) 0%, transparent 30%, transparent 55%, rgba(12,26,50,0.95) 100%);
+    }
+    .hero-overlay {
+      position: absolute; inset: 0; z-index: 3; pointer-events: none;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      text-align: center; padding: 2rem;
+      opacity: 0; transition: opacity 700ms ease 0.9s;
+    }
+    .hero-overlay.visible { opacity: 1; }
+    .hero-overlay-inner {
+      position: relative; pointer-events: auto; background: rgba(12,26,50,0.45);
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+      padding: 2.6rem 3.4rem; border-radius: 20px; border: 1px solid rgba(245,240,224,0.08);
+      max-width: 820px;
+    }
+    .hero-kicker {
+      font-family: 'B612 Mono', monospace; font-size: 0.78rem; letter-spacing: 0.22em;
+      text-transform: uppercase; color: var(--accent-lime); margin-bottom: 1.1rem;
+    }
+    .hero-title {
+      font-family: 'Abril Fatface', serif; font-size: clamp(3.2rem, 12vw, 9rem);
+      line-height: 0.82; letter-spacing: -0.02em; color: var(--text-primary);
+      margin-bottom: 1.2rem; text-shadow: 0 2px 40px rgba(0,0,0,0.6);
+    }
+    .hero-title span { display: block; color: var(--accent-orange); }
+    .hero-tagline {
+      font-weight: 400; font-size: clamp(0.95rem, 2vw, 1.2rem);
+      color: var(--text-primary); max-width: 50ch; margin: 0 auto 2.2rem; opacity: 0.92;
+    }
+    .hero-ctas { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+    .btn-primary {
+      font-weight: 700; font-size: 1rem; background: var(--accent-orange); color: #fff;
+      padding: 0.85rem 2.2rem; border-radius: 100px; border: 2px solid var(--accent-orange);
+      display: inline-block; transition: transform 200ms ease, background 200ms ease;
+    }
+    .btn-primary:hover { background: #e85820; border-color: #e85820; transform: translateY(-2px); }
+    .btn-outline {
+      font-weight: 700; font-size: 1rem; background: transparent; color: var(--text-primary);
+      padding: 0.85rem 2.2rem; border-radius: 100px; border: 2px solid rgba(245,240,224,0.5);
+      display: inline-block; transition: transform 200ms ease, border-color 200ms ease;
+    }
+    .btn-outline:hover { border-color: var(--text-primary); transform: translateY(-2px); }
+
+    .hero-stats {
+      position: absolute; bottom: 2.4rem; left: 50%; transform: translateX(-50%);
+      z-index: 4; display: flex; gap: 3rem; flex-wrap: wrap; justify-content: center;
+      opacity: 0; transition: opacity 600ms ease 1.4s;
+    }
+    .hero-stats.visible { opacity: 1; }
+    .hero-stat { text-align: center; }
+    .hero-stat-num { font-family: 'Abril Fatface', serif; font-size: 2rem; color: var(--accent-gold); display: block; }
+    .hero-stat-label { font-family: 'B612 Mono', monospace; font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; }
+
+    /* ===== SHARED SECTION ===== */
+    .section-kicker {
+      font-family: 'B612 Mono', monospace; font-size: 0.75rem; text-transform: uppercase;
+      letter-spacing: 0.2em; color: var(--accent-lime); margin-bottom: 1rem;
+    }
+    .section-heading {
+      font-family: 'Abril Fatface', serif; font-size: clamp(2rem, 5vw, 3.5rem);
+      line-height: 1.1; color: var(--text-primary); margin-bottom: 1rem;
+    }
+    .section-sub { color: var(--text-muted); max-width: 56ch; }
+    .word-reveal {
+      display: inline-block; opacity: 0; filter: blur(8px); transform: translateY(12px);
+      transition: opacity 500ms ease, filter 500ms ease, transform 500ms ease;
+    }
+    .word-reveal.revealed { opacity: 1; filter: blur(0); transform: translateY(0); }
+
+    /* ===== CATALOG / xSTOCKS BY SECTOR ===== */
+    .catalog-section { position: relative; z-index: 1; background: var(--bg-primary); padding: 8rem 3rem 6rem; }
+    .catalog-header { max-width: 1200px; margin: 0 auto 3rem; }
+    .filter-pills { display: flex; gap: 0.7rem; flex-wrap: wrap; margin-top: 2rem; }
+    .filter-pill {
+      font-family: 'B612 Mono', monospace; font-size: 0.75rem; text-transform: uppercase;
+      letter-spacing: 0.1em; padding: 0.5rem 1.2rem; border-radius: 100px;
+      background: var(--surface); color: var(--text-muted);
+      border: 1px solid rgba(139,170,212,0.2);
+      transition: background 200ms ease, color 200ms ease, border-color 200ms ease;
+    }
+    .filter-pill.active, .filter-pill:hover { background: var(--accent-orange); color: #fff; border-color: var(--accent-orange); }
+    .catalog-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.2rem;
+      max-width: 1200px; margin: 0 auto;
+    }
+    .stock-tile {
+      position: relative; overflow: hidden; background: var(--surface); border-radius: 16px;
+      padding: 1.4rem; border: 1px solid rgba(139,170,212,0.12);
+      transition: transform 300ms ease, box-shadow 300ms ease, border-color 300ms ease;
+    }
+    .stock-tile:hover { transform: translateY(-6px); box-shadow: 0 16px 40px rgba(0,0,0,0.45); border-color: rgba(245,200,66,0.35); }
+    .stock-tile-top { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 1rem; }
+    .stock-logo { width: 42px; height: 42px; border-radius: 10px; background: #0C1A32; padding: 6px; object-fit: contain; }
+    .stock-ticker { font-family: 'B612 Mono', monospace; font-weight: 700; font-size: 1rem; color: var(--text-primary); }
+    .stock-sector { font-family: 'B612 Mono', monospace; font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent-lime); }
+    .stock-name { font-size: 0.92rem; color: var(--text-muted); margin-bottom: 1rem; min-height: 2.6em; }
+    .stock-meta { display: flex; align-items: baseline; justify-content: space-between; }
+    .stock-price { font-family: 'B612 Mono', monospace; font-size: 1.1rem; color: var(--text-primary); }
+    .stock-chg { font-family: 'B612 Mono', monospace; font-size: 0.85rem; font-weight: 700; }
+    .stock-chg.up { color: var(--green-up); }
+    .stock-chg.down { color: var(--red-down); }
+    .catalog-foot { max-width: 1200px; margin: 2.6rem auto 0; text-align: center; color: var(--text-muted); font-family: 'B612 Mono', monospace; font-size: 0.8rem; letter-spacing: 0.06em; }
+
+    /* ===== PREVIEW (horizontal pin scroll) ===== */
+    .preview-outer { position: relative; height: 300vh; background: var(--bg-secondary); z-index: 1; }
+    .preview-section-heading { position: absolute; top: 0; left: 0; right: 0; padding: 5rem 3rem 0; text-align: center; z-index: 2; }
+    .preview-sticky { position: sticky; top: 0; height: 100vh; overflow: hidden; display: flex; align-items: center; }
+    .preview-strip { display: flex; gap: 2rem; padding: 0 6vw; will-change: transform; }
+    .preview-card {
+      flex: 0 0 70vw; max-width: 880px; height: 62vh; border-radius: 24px;
+      background: linear-gradient(150deg, var(--surface), #14264a);
+      border: 1px solid rgba(245,240,224,0.08); padding: 3rem; position: relative; overflow: hidden;
+      display: flex; flex-direction: column; justify-content: flex-end;
+    }
+    .preview-card-num { font-family: 'B612 Mono', monospace; font-size: 0.8rem; letter-spacing: 0.2em; color: var(--accent-gold); position: absolute; top: 2.4rem; left: 3rem; }
+    .preview-card-icon { position: absolute; top: 2rem; right: 2.6rem; font-size: 3.4rem; opacity: 0.9; }
+    .preview-card h3 { font-family: 'Abril Fatface', serif; font-size: clamp(1.8rem, 4vw, 3rem); line-height: 1.05; margin-bottom: 1rem; }
+    .preview-card p { color: var(--text-muted); max-width: 52ch; font-size: 1.02rem; }
+    .preview-card .chip { display: inline-block; margin-top: 1.4rem; font-family: 'B612 Mono', monospace; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent-lime); border: 1px solid rgba(168,230,58,0.35); padding: 0.4rem 1rem; border-radius: 100px; width: fit-content; }
+    .preview-glow { position: absolute; width: 420px; height: 420px; border-radius: 50%; filter: blur(90px); opacity: 0.4; top: -120px; left: -80px; background: var(--accent-orange); }
+    .preview-card:nth-child(even) .preview-glow { background: var(--accent-lime); left: auto; right: -80px; }
+
+    /* ===== HOW IT WORKS (split) ===== */
+    .how-section { position: relative; z-index: 1; background: var(--bg-primary); padding: 8rem 3rem; }
+    .how-inner { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 4rem; align-items: center; }
+    .how-visual {
+      position: relative; aspect-ratio: 1/1; border-radius: 24px; overflow: hidden;
+      background: radial-gradient(circle at 50% 50%, #1A2E5A, #0C1A32 70%);
+      border: 1px solid rgba(245,240,224,0.08);
+      container-type: size;
+      opacity: 0; transform: scale(0.94); transition: opacity 800ms ease, transform 800ms ease;
+    }
+    .how-visual.revealed { opacity: 1; transform: scale(1); }
+    .orbit { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); border: 1px solid rgba(139,170,212,0.14); border-radius: 50%; }
+    .orbit.o1 { width: 36%; height: 36%; } .orbit.o2 { width: 56%; height: 56%; } .orbit.o3 { width: 76%; height: 76%; }
+
+    /* allocation gauge — the agent's target split, drawn on rebalance */
+    .alloc-ring {
+      position: absolute; top: 50%; left: 50%; width: 94cqw; height: 94cqw;
+      transform: translate(-50%,-50%) rotate(-90deg) scale(0.82); border-radius: 50%;
+      background: conic-gradient(var(--accent-orange) 0 60%, var(--accent-gold) 60% 85%, var(--accent-lime) 85% 100%);
+      -webkit-mask: radial-gradient(closest-side, transparent 87%, #000 88%);
+              mask: radial-gradient(closest-side, transparent 87%, #000 88%);
+      opacity: 0; z-index: 1;
+      transition: opacity 900ms ease, transform 900ms cubic-bezier(0.2,0.8,0.2,1);
+    }
+    .how-visual.rebalanced .alloc-ring { opacity: 0.85; transform: translate(-50%,-50%) rotate(0deg) scale(1); }
+
+    .orbit-core {
+      position: absolute; top: 50%; left: 50%; z-index: 3;
+      width: 26%; height: 26%; border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, #FFE7A0, var(--accent-gold) 38%, var(--accent-orange) 78%);
+      display: flex; align-items: center; justify-content: center;
+      font-family: 'Abril Fatface', serif; color: #0C1A32; font-size: 1.4rem;
+      animation: corePulse 4.5s ease-in-out infinite;
+    }
+    @keyframes corePulse {
+      0%, 100% { box-shadow: 0 0 40px rgba(255,107,53,0.45), 0 0 0 0 rgba(255,107,53,0.30); transform: translate(-50%,-50%) scale(1); }
+      50%      { box-shadow: 0 0 80px rgba(255,107,53,0.75), 0 0 0 16px rgba(255,107,53,0.0); transform: translate(-50%,-50%) scale(1.06); }
+    }
+
+    .orbit-chip {
+      position: absolute; top: 50%; left: 50%; margin: -23px 0 0 -23px;
+      width: 46px; height: 46px; border-radius: 12px; background: var(--surface);
+      display: flex; align-items: center; justify-content: center; padding: 7px; z-index: 4;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.5), 0 0 0 1px rgba(245,240,224,0.06);
+      animation: spin var(--sp, 24s) linear infinite;
+      transition: box-shadow 400ms ease;
+    }
+    .orbit-chip.rev { animation-direction: reverse; }
+    .orbit-chip.g-growth { --gc: 255,107,53; }
+    .orbit-chip.g-yield { --gc: 245,200,66; }
+    .orbit-chip.g-protection { --gc: 168,230,58; }
+    .how-visual.rebalanced .orbit-chip {
+      box-shadow: 0 6px 20px rgba(0,0,0,0.5), 0 0 0 2px rgba(var(--gc),0.85), 0 0 18px rgba(var(--gc),0.5);
+    }
+    .orbit-chip img { width: 100%; height: 100%; object-fit: contain; transition: transform 200ms ease; }
+    .orbit-chip:hover { animation-play-state: paused; z-index: 12; }
+    .orbit-chip:hover img { transform: scale(1.2); }
+    .orbit-chip::after {
+      content: attr(data-tk); position: absolute; bottom: 116%; left: 50%; transform: translateX(-50%);
+      font-family: 'B612 Mono', monospace; font-size: 0.6rem; letter-spacing: 0.06em; color: var(--text-primary);
+      background: rgba(12,26,50,0.92); padding: 2px 7px; border-radius: 6px; white-space: nowrap;
+      opacity: 0; transition: opacity 200ms ease; pointer-events: none;
+    }
+    .orbit-chip:hover::after { opacity: 1; }
+    @keyframes spin {
+      from { transform: rotate(var(--start, 0deg)) translateX(var(--rad)) rotate(calc(-1 * var(--start, 0deg))); }
+      to   { transform: rotate(calc(var(--start, 0deg) + 360deg)) translateX(var(--rad)) rotate(calc(-1 * var(--start, 0deg) - 360deg)); }
+    }
+    .alloc-legend { display: flex; gap: 1.3rem; flex-wrap: wrap; margin-top: 1.5rem; }
+    .alloc-legend .leg {
+      display: flex; align-items: center; gap: 0.5rem; font-family: 'B612 Mono', monospace;
+      font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted);
+    }
+    .alloc-legend .dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+    .how-text-line { opacity: 0; transform: translateY(16px); transition: opacity 600ms ease, transform 600ms ease; }
+    .how-text-line.revealed { opacity: 1; transform: translateY(0); }
+    .how-steps { list-style: none; margin-top: 1.6rem; display: flex; flex-direction: column; gap: 1.1rem; }
+    .how-steps li { display: flex; gap: 1rem; align-items: flex-start; }
+    .how-step-n { font-family: 'B612 Mono', monospace; color: var(--accent-gold); font-weight: 700; flex: 0 0 auto; }
+    .how-steps strong { color: var(--text-primary); }
+    .how-steps span { color: var(--text-muted); }
+
+    /* ===== ROADMAP (timeline) ===== */
+    .events-outer { position: relative; z-index: 1; background: var(--bg-secondary); padding: 7rem 3rem 9rem; min-height: 120vh; }
+    .events-sticky { max-width: 900px; margin: 0 auto; position: relative; }
+    .events-head { text-align: center; margin-bottom: 4rem; }
+    .events-heading { font-family: 'Abril Fatface', serif; font-size: clamp(2rem, 5vw, 3.5rem); transition: letter-spacing 800ms ease, opacity 800ms ease; letter-spacing: 0.4em; opacity: 0; }
+    .events-heading.wound { letter-spacing: 0.02em; opacity: 1; }
+    .timeline { position: relative; padding: 1rem 0; }
+    .timeline-line { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: linear-gradient(var(--accent-orange), var(--accent-lime)); transform: translateX(-50%) scaleY(0); transform-origin: top; }
+    .event-card {
+      position: relative; width: 46%; padding: 1.6rem 1.8rem; border-radius: 16px;
+      background: var(--surface); border: 1px solid rgba(139,170,212,0.14); margin-bottom: 2.4rem;
+      opacity: 0; transform: translateY(30px); transition: opacity 600ms ease, transform 600ms ease;
+    }
+    .event-card.revealed { opacity: 1; transform: translateY(0); }
+    .event-card:nth-child(odd) { margin-left: auto; }
+    .event-card .ev-date { font-family: 'B612 Mono', monospace; font-size: 0.72rem; letter-spacing: 0.12em; color: var(--accent-gold); text-transform: uppercase; }
+    .event-card h4 { font-size: 1.2rem; margin: 0.3rem 0 0.5rem; }
+    .event-card p { color: var(--text-muted); font-size: 0.92rem; }
+    .event-card .ev-status { display:inline-block; margin-top: 0.7rem; font-family: 'B612 Mono', monospace; font-size: 0.64rem; letter-spacing: 0.1em; text-transform: uppercase; padding: 0.25rem 0.7rem; border-radius: 100px; }
+    .ev-status.done { color: var(--accent-lime); border: 1px solid rgba(168,230,58,0.4); }
+    .ev-status.live { color: var(--accent-gold); border: 1px solid rgba(245,200,66,0.4); }
+    .ev-status.next { color: var(--text-muted); border: 1px solid rgba(139,170,212,0.3); }
+
+    /* ===== CTA / FOOTER ===== */
+    .newsletter-section { position: relative; z-index: 1; background: var(--bg-primary); text-align: center; padding: 8rem 3rem; }
+    .newsletter-heading { font-family: 'Abril Fatface', serif; font-size: clamp(2.2rem, 6vw, 4.5rem); line-height: 1; margin-bottom: 1.2rem; }
+    .newsletter-sub { color: var(--text-muted); max-width: 52ch; margin: 0 auto 2.4rem; }
+    .footer-reveal { opacity: 0; transform: translateY(20px); transition: opacity 600ms ease, transform 600ms ease; }
+    .footer-reveal.revealed { opacity: 1; transform: translateY(0); }
+
+    .footer { position: relative; z-index: 1; background: #081225; padding: 4rem 3rem 2rem; }
+    .footer-grid { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 2rem; }
+    .footer-logo { font-family: 'Abril Fatface', serif; font-size: 1.5rem; }
+    .footer-logo span { color: var(--accent-orange); }
+    .footer-tagline { color: var(--text-muted); margin-top: 0.6rem; max-width: 34ch; font-size: 0.92rem; }
+    .footer-col h4 { font-family: 'B612 Mono', monospace; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent-lime); margin-bottom: 1rem; }
+    .footer-col ul { list-style: none; display: flex; flex-direction: column; gap: 0.6rem; }
+    .footer-col a { color: var(--text-muted); font-size: 0.92rem; transition: color 200ms ease; }
+    .footer-col a:hover { color: var(--text-primary); }
+    .footer-bottom { max-width: 1200px; margin: 3rem auto 0; padding-top: 1.6rem; border-top: 1px solid rgba(139,170,212,0.15); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
+    .footer-copy { color: var(--text-muted); font-size: 0.82rem; font-family: 'B612 Mono', monospace; }
+    .footer-copy a { color: var(--text-muted); }
+    .footer-copy a:hover { color: var(--accent-gold); }
+
+    /* ===== RESPONSIVE ===== */
+    @media (max-width: 900px) {
+      .nav { padding: 1rem 1.4rem; }
+      .nav-links { display: none; }
+      .hero { height: auto; min-height: 100vh; }
+      .hero-rows { gap: 8px; padding: 8px; height: 100vh; bottom: auto; }
+      .hero-vignette { height: 100vh; bottom: auto; }
+      .hero-overlay {
+        position: relative; inset: auto; min-height: 100vh;
+        padding: 5rem 1.2rem 2rem;
+      }
+      .hero-overlay-inner { padding: 1.8rem 1.3rem; max-width: 100%; }
+      .hero-stats {
+        position: relative; left: auto; bottom: auto; transform: none;
+        margin: 0 auto; padding: 1.6rem 1.2rem 3rem; width: fit-content;
+        display: grid; grid-template-columns: repeat(2, auto); gap: 1.4rem 2.6rem; justify-content: center;
+      }
+      .hero-stat-num { font-size: 1.6rem; }
+      .catalog-section, .how-section, .events-outer, .newsletter-section { padding-left: 1.4rem; padding-right: 1.4rem; }
+      .catalog-grid { grid-template-columns: repeat(2, 1fr); }
+      .preview-card { flex: 0 0 84vw; height: 66vh; padding: 1.8rem; }
+      .how-inner { grid-template-columns: 1fr; gap: 2.4rem; }
+      .event-card { width: 100%; margin-left: 0 !important; }
+      .timeline-line { left: 14px; }
+      .footer-grid { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 520px) {
+      .hero-rows { gap: 6px; padding: 6px; }
+      .stock-tile { padding: 1rem; }
+      .stock-name { min-height: 3.6em; font-size: 0.82rem; }
+      .footer-grid { grid-template-columns: 1fr; }
+    }
+
+    /* ===== REDUCED MOTION — rich static, never blank ===== */
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .star { animation: none !important; opacity: var(--max-op, 0.6) !important; }
+      .orbit-core { animation: none !important; transform: translate(-50%,-50%) !important; }
+      .orbit-chip {
+        animation: none !important;
+        transform: rotate(var(--start, 0deg)) translateX(var(--rad)) rotate(calc(-1 * var(--start, 0deg))) !important;
+      }
+      .alloc-ring { opacity: 0.85 !important; transform: translate(-50%,-50%) rotate(0deg) scale(1) !important; }
+      .hero-rows { opacity: 1 !important; }
+      .hero-row-track { animation: none !important; }
+      .hero-tile, .hero-overlay, .hero-stats, .word-reveal, .how-visual,
+      .how-text-line, .event-card, .footer-reveal {
+        transition: none !important;
+        opacity: 1 !important;
+        transform: none !important;
+        filter: none !important;
+      }
+      .hero-tile { transform: none !important; }
+      .events-heading { letter-spacing: 0.02em !important; opacity: 1 !important; }
+      .timeline-line { transform: translateX(-50%) scaleY(1) !important; }
+      .preview-outer { height: auto !important; }
+      .preview-sticky { position: static !important; height: auto !important; display: block !important; }
+      .preview-strip { flex-direction: column; transform: none !important; padding: 6rem 1.4rem 3rem; }
+      .preview-card { flex: none; width: 100%; max-width: 100%; height: auto; min-height: 340px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="star-field" id="starField" aria-hidden="true"></div>
+
+  <!-- ===== NAVIGATION ===== -->
+  <nav class="nav" role="navigation" aria-label="Main navigation">
+    <a href="#hero" class="nav-logo">Stock<span>Pilot</span></a>
+    <ul class="nav-links">
+      <li><a href="#markets">xStocks</a></li>
+      <li><a href="#product">Product</a></li>
+      <li><a href="#how">How it works</a></li>
+      <li><a href="#roadmap">Roadmap</a></li>
+    </ul>
+    <a href="https://app.stockpilotai.xyz" class="nav-cta">Launch App</a>
+  </nav>
+
+  <!-- ===== HERO ===== -->
+  <section class="hero" id="hero" aria-label="Hero">
+    <div class="hero-rows" id="heroRows" aria-hidden="true"></div>
+    <div class="hero-vignette" aria-hidden="true"></div>
+
+    <div class="hero-overlay" id="heroOverlay">
+      <div class="hero-overlay-inner">
+        <div class="hero-kicker">AI × RWA · Built on Mantle</div>
+        <h1 class="hero-title">STOCK<span>PILOT</span></h1>
+        <p class="hero-tagline">An autonomous AI agent that researches, allocates and rebalances a portfolio of 155 tokenized equities — with every decision recorded on-chain.</p>
+        <div class="hero-ctas">
+          <a href="https://app.stockpilotai.xyz" class="btn-primary">Launch App</a>
+          <a href="https://youtu.be/XTwdpAhcoTo" target="_blank" rel="noopener" class="btn-outline">Watch Demo</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="hero-stats" id="heroStats" aria-label="Key metrics">
+      <div class="hero-stat"><span class="hero-stat-num">155</span><span class="hero-stat-label">xStocks</span></div>
+      <div class="hero-stat"><span class="hero-stat-num">65+</span><span class="hero-stat-label">Bridge Networks</span></div>
+      <div class="hero-stat"><span class="hero-stat-num">24/7</span><span class="hero-stat-label">On-chain</span></div>
+      <div class="hero-stat"><span class="hero-stat-num">1:1</span><span class="hero-stat-label">Asset Backed</span></div>
+    </div>
+  </section>
+
+  <!-- ===== xSTOCKS BY SECTOR ===== -->
+  <section class="catalog-section" id="markets" aria-label="xStocks by sector">
+    <div class="catalog-header">
+      <div class="section-kicker">The Market</div>
+      <h2 class="section-heading" id="catalogHeading">Tokenized equities, by sector</h2>
+      <p class="section-sub">Real US stocks, on-chain and tradable 24/7. Browse a slice of the 155 xStocks available inside StockPilot.</p>
+      <div class="filter-pills" role="group" aria-label="Filter by sector">
+        <button class="filter-pill active" data-filter="all">All</button>
+        <button class="filter-pill" data-filter="tech">Tech</button>
+        <button class="filter-pill" data-filter="index">Indices</button>
+        <button class="filter-pill" data-filter="finance">Finance</button>
+        <button class="filter-pill" data-filter="consumer">Consumer</button>
+        <button class="filter-pill" data-filter="crypto">Crypto-linked</button>
+      </div>
+    </div>
+
+    <div class="catalog-grid" id="catalogGrid"></div>
+    <div class="catalog-foot">+ 143 more xStocks available in the app — SPYx · QQQx · and the full S&amp;P universe.</div>
+  </section>
+
+  <!-- ===== PRODUCT (horizontal pin scroll) ===== -->
+  <div class="preview-outer" id="previewOuter" aria-label="Inside the app">
+    <div class="preview-section-heading">
+      <div class="section-kicker" style="color:var(--accent-gold)" id="product">Inside the App</div>
+      <h2 class="section-heading">One cockpit for tokenized markets</h2>
+    </div>
+    <div class="preview-sticky" id="previewSticky">
+      <div class="preview-strip" id="previewStrip">
+        <article class="preview-card"><span class="preview-glow"></span><span class="preview-card-num">01</span><span class="preview-card-icon">📈</span><h3>Market</h3><p>155 xStocks with a real-time price ticker, AI company &amp; risk notes, and one-click buy.</p><span class="chip">Live stock prices</span></article>
+        <article class="preview-card"><span class="preview-glow"></span><span class="preview-card-num">02</span><span class="preview-card-icon">🔁</span><h3>Swap</h3><p>Spot swaps on the Fluxion DEX with real quotes, wallet balances and ERC-4626 auto-wrapping.</p><span class="chip">Fluxion · native MNT</span></article>
+        <article class="preview-card"><span class="preview-glow"></span><span class="preview-card-num">03</span><span class="preview-card-icon">🌉</span><h3>Bridge</h3><p>Move assets to Mantle from 65+ EVM networks via the Relay widget — no external redirects.</p><span class="chip">Relay · 65+ networks</span></article>
+        <article class="preview-card"><span class="preview-glow"></span><span class="preview-card-num">04</span><span class="preview-card-icon">🧮</span><h3>Portfolio</h3><p>Build allocations with sliders or one-click AI strategy, and watch a live pie-chart rebalance.</p><span class="chip">AI strategies</span></article>
+        <article class="preview-card"><span class="preview-glow"></span><span class="preview-card-num">05</span><span class="preview-card-icon">🦉</span><h3>Stocky</h3><p>An AI concierge powered by Nansen flows, ELFA sentiment and AltLLM — on every screen.</p><span class="chip">AI assistant</span></article>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== HOW IT WORKS ===== -->
+  <section class="how-section" id="how" aria-label="How it works">
+    <div class="how-inner">
+      <div class="how-visual" id="howVisual" aria-hidden="true">
+        <div class="orbit o1"></div><div class="orbit o2"></div><div class="orbit o3"></div>
+        <div class="alloc-ring"></div>
+        <div class="orbit-core">AI</div>
+      </div>
+      <div>
+        <div class="section-kicker how-text-line">The Engine</div>
+        <h2 class="section-heading how-text-line" style="transition-delay:80ms">Research. Allocate. Record on-chain.</h2>
+        <p class="section-sub how-text-line" style="transition-delay:160ms">StockPilot turns market signals into a transparent, auditable portfolio. The agent doesn't just trade — it leaves a permanent track record on Mantle.</p>
+        <div class="alloc-legend how-text-line" style="transition-delay:200ms" aria-label="Target allocation split">
+          <span class="leg"><span class="dot" style="background:var(--accent-orange)"></span>Growth 60%</span>
+          <span class="leg"><span class="dot" style="background:var(--accent-gold)"></span>Yield 25%</span>
+          <span class="leg"><span class="dot" style="background:var(--accent-lime)"></span>Protection 15%</span>
+        </div>
+        <ul class="how-steps">
+          <li class="how-text-line" style="transition-delay:220ms"><span class="how-step-n">01</span><span><strong>Gather signals.</strong> Nansen smart-money flows, ELFA sentiment and realized volatility.</span></li>
+          <li class="how-text-line" style="transition-delay:300ms"><span class="how-step-n">02</span><span><strong>Allocate.</strong> AI classifies the regime and targets a growth / protection / yield split.</span></li>
+          <li class="how-text-line" style="transition-delay:380ms"><span class="how-step-n">03</span><span><strong>Execute.</strong> Swaps route through Fluxion; assets bridge in via Relay.</span></li>
+          <li class="how-text-line" style="transition-delay:460ms"><span class="how-step-n">04</span><span><strong>Record.</strong> Every decision is written on-chain via <code>recordDecision</code> — verifiable on Mantlescan.</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== ROADMAP ===== -->
+  <div class="events-outer" id="roadmap" aria-label="Roadmap">
+    <div class="events-sticky">
+      <div class="events-head">
+        <div class="section-kicker" style="color:var(--accent-gold)">The Journey</div>
+        <h2 class="events-heading" id="eventsHeading">Roadmap</h2>
+      </div>
+      <div class="timeline">
+        <div class="timeline-line" id="timelineLine" aria-hidden="true"></div>
+        <div class="event-card"><span class="ev-date">Phase 1</span><h4>Live on Mantle</h4><p>Agent contract deployed &amp; verified, ERC-8004 identity, on-chain decision log.</p><span class="ev-status done">Shipped</span></div>
+        <div class="event-card"><span class="ev-date">Phase 2</span><h4>155 xStocks + AI</h4><p>Full xStocks universe, AI strategies, and the Stocky concierge.</p><span class="ev-status done">Shipped</span></div>
+        <div class="event-card"><span class="ev-date">Phase 3</span><h4>Fluxion + Relay</h4><p>On-page swaps via Fluxion and cross-chain bridging across 65+ networks.</p><span class="ev-status done">Shipped</span></div>
+        <div class="event-card"><span class="ev-date">Phase 4</span><h4>Rebuilt multi-route app</h4><p>New sidebar experience, real-time price ticker, mobile-first and deep-linkable.</p><span class="ev-status live">Live now</span></div>
+        <div class="event-card"><span class="ev-date">Phase 5</span><h4>Full Autopilot</h4><p>Hands-off rebalancing across growth / protection / yield with on-chain guardrails.</p><span class="ev-status next">Next</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== CTA ===== -->
+  <section class="newsletter-section" aria-label="Get started">
+    <h2 class="newsletter-heading footer-reveal">Put your portfolio on autopilot.</h2>
+    <p class="newsletter-sub footer-reveal" style="transition-delay:100ms">Tokenized equities, AI strategies and on-chain transparency — live on Mantle. Connect a wallet and start in minutes.</p>
+    <div class="hero-ctas footer-reveal" style="transition-delay:200ms">
+      <a href="https://app.stockpilotai.xyz" class="btn-primary">Launch App</a>
+      <a href="https://youtu.be/XTwdpAhcoTo" target="_blank" rel="noopener" class="btn-outline">Watch the 6-min demo</a>
+    </div>
+  </section>
+
+  <!-- ===== FOOTER ===== -->
+  <footer class="footer" role="contentinfo">
+    <div class="footer-grid">
+      <div class="footer-brand footer-reveal">
+        <div class="footer-logo">Stock<span>Pilot</span></div>
+        <p class="footer-tagline">AI-powered portfolio manager for tokenized equities (xStocks) on Mantle Network.</p>
+      </div>
+      <div class="footer-col footer-reveal" style="transition-delay:80ms">
+        <h4>Product</h4>
+        <ul>
+          <li><a href="https://app.stockpilotai.xyz">Launch App</a></li>
+          <li><a href="#markets">xStocks</a></li>
+          <li><a href="#how">How it works</a></li>
+          <li><a href="#roadmap">Roadmap</a></li>
+        </ul>
+      </div>
+      <div class="footer-col footer-reveal" style="transition-delay:160ms">
+        <h4>Resources</h4>
+        <ul>
+          <li><a href="https://github.com/kirst-dk/stockpilot-ai" target="_blank" rel="noopener">GitHub</a></li>
+          <li><a href="https://dorahacks.io/buidl/43884" target="_blank" rel="noopener">DoraHacks BUIDL</a></li>
+          <li><a href="https://youtu.be/XTwdpAhcoTo" target="_blank" rel="noopener">Demo video</a></li>
+          <li><a href="https://mantlescan.xyz/address/0xbbE80ACe5c46b49930ff0229762a1A57BE4CA6F4" target="_blank" rel="noopener">Contract</a></li>
+        </ul>
+      </div>
+      <div class="footer-col footer-reveal" style="transition-delay:240ms">
+        <h4>Connect</h4>
+        <ul>
+          <li><a href="https://x.com/0xkirst" target="_blank" rel="noopener">X / @0xkirst</a></li>
+          <li><a href="https://www.mantle.xyz/" target="_blank" rel="noopener">Mantle Network</a></li>
+          <li><a href="https://xstocks.fi" target="_blank" rel="noopener">xStocks</a></li>
+          <li><a href="https://fluxion.network" target="_blank" rel="noopener">Fluxion</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span class="footer-copy">© 2026 StockPilot AI · Built for the Turing Test Hackathon 2026</span>
+      <span class="footer-copy">Made on <a href="https://www.mantle.xyz/" target="_blank" rel="noopener">Mantle</a> ✦</span>
+    </div>
+  </footer>
+
+  <!-- ===== JAVASCRIPT ===== -->
+  <script>
+    'use strict';
+    var REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // ===== STAR FIELD =====
+    (function buildStarField() {
+      var container = document.getElementById('starField');
+      var count = REDUCE ? 70 : 130;
+      var frag = document.createDocumentFragment();
+      for (var i = 0; i < count; i++) {
+        var s = document.createElement('div');
+        s.className = 'star';
+        var size = Math.random() * 2.4 + 0.5;
+        s.style.cssText = [
+          'width:' + size + 'px', 'height:' + size + 'px',
+          'top:' + (Math.random() * 100) + '%', 'left:' + (Math.random() * 100) + '%',
+          '--dur:' + (2 + Math.random() * 4) + 's', '--delay:' + (-Math.random() * 4) + 's',
+          '--min-op:' + (0.05 + Math.random() * 0.2), '--max-op:' + (0.5 + Math.random() * 0.5)
+        ].join(';');
+        frag.appendChild(s);
+      }
+      container.appendChild(frag);
+    })();
+
+    // ===== HERO BACKGROUND (per-row horizontal marquee, alternating directions) =====
+    var HERO_TICKERS = ['AAPLx','NVDAx','TSLAx','AMZNx','GOOGLx','METAx','MSFTx','SPYx','QQQx','AMDx','AVGOx','NFLXx','COINx','HOODx','MSTRx','PLTRx','JPMx','Vx','ORCLx','CRMx','MCDx','KOx','JNJx','ABBVx'];
+    (function buildHeroRows() {
+      var host = document.getElementById('heroRows');
+      var ROWS = 4;            // alternating left / right
+      var PER_ROW = 14;        // unique tiles per row (track holds 2 copies for seamless loop)
+      var DURS = [55, 70, 60, 80];
+      var n = HERO_TICKERS.length;
+
+      function makeTile(tk) {
+        var t = document.createElement('div');
+        t.className = 'hero-tile';
+        t.setAttribute('data-tk', tk);
+        var img = document.createElement('img');
+        img.src = 'logos/' + tk + '.png';
+        img.alt = tk;
+        img.loading = 'lazy';
+        t.appendChild(img);
+        return t;
+      }
+
+      for (var r = 0; r < ROWS; r++) {
+        var row = document.createElement('div');
+        row.className = 'hero-row ' + (r % 2 === 0 ? 'left' : 'right');
+        row.style.setProperty('--dur', DURS[r % DURS.length] + 's');
+
+        var track = document.createElement('div');
+        track.className = 'hero-row-track';
+
+        // one "set" of tiles, offset per row for variety
+        var set = [];
+        for (var i = 0; i < PER_ROW; i++) {
+          set.push(HERO_TICKERS[(r * 5 + i) % n]);
+        }
+        // duplicate the set so translateX(-50%) loops seamlessly
+        for (var c = 0; c < 2; c++) {
+          for (var j = 0; j < set.length; j++) {
+            var tile = makeTile(set[j]);
+            if (c === 1) tile.setAttribute('aria-hidden', 'true');
+            track.appendChild(tile);
+          }
+        }
+        row.appendChild(track);
+        host.appendChild(row);
+      }
+
+      var reveal = function () { host.classList.add('visible'); };
+      if (REDUCE) { reveal(); } else { requestAnimationFrame(reveal); }
+    })();
+
+    // ===== HERO OVERLAY REVEAL =====
+    (function revealHero() {
+      var show = function () {
+        document.getElementById('heroOverlay').classList.add('visible');
+        document.getElementById('heroStats').classList.add('visible');
+      };
+      if (REDUCE) { show(); } else { setTimeout(show, 700); }
+    })();
+
+    // ===== SCROLL RAF LOOP =====
+    if (!REDUCE) {
+      var lastScrollY = 0, ticking = false;
+      window.addEventListener('scroll', function () {
+        lastScrollY = window.scrollY;
+        if (!ticking) { requestAnimationFrame(update); ticking = true; }
+      }, { passive: true });
+
+      function update() {
+        var sy = lastScrollY;
+
+        // Horizontal pin scroll (product strip)
+        var previewOuter = document.getElementById('previewOuter');
+        var previewStrip = document.getElementById('previewStrip');
+        if (previewOuter && previewStrip) {
+          var vh = window.innerHeight;
+          var scrollStart = previewOuter.offsetTop;
+          var scrollRange = previewOuter.offsetHeight - vh;
+          var progress = Math.max(0, Math.min(1, (sy - scrollStart) / scrollRange));
+          var maxShift = previewStrip.scrollWidth - window.innerWidth;
+          previewStrip.style.transform = 'translateX(-' + (progress * maxShift) + 'px)';
+        }
+
+        // Roadmap timeline draw + card reveal
+        var eventsOuter = document.getElementById('roadmap');
+        var timelineLine = document.getElementById('timelineLine');
+        if (eventsOuter && timelineLine) {
+          var vh2 = window.innerHeight;
+          var scrollInto = sy - eventsOuter.offsetTop + vh2 * 0.5;
+          var prog = Math.max(0, Math.min(1, scrollInto / (eventsOuter.offsetHeight * 0.8)));
+          timelineLine.style.transform = 'translateX(-50%) scaleY(' + prog + ')';
+          var cards = document.querySelectorAll('.event-card');
+          cards.forEach(function (card, idx) {
+            if (prog > idx / (cards.length + 1)) card.classList.add('revealed');
+          });
+        }
+        ticking = false;
+      }
+    }
+
+    // ===== WORD REVEAL (catalog heading) =====
+    (function setupWordReveal() {
+      var heading = document.getElementById('catalogHeading');
+      if (!heading) return;
+      var words = heading.textContent.split(' ');
+      heading.innerHTML = words.map(function (w, i) {
+        return '<span class="word-reveal" style="transition-delay:' + (i * 80) + 'ms">' + w + '</span>';
+      }).join(' ');
+      if (REDUCE) { heading.querySelectorAll('.word-reveal').forEach(function (el) { el.classList.add('revealed'); }); return; }
+      var obs = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) { heading.querySelectorAll('.word-reveal').forEach(function (el) { el.classList.add('revealed'); }); obs.unobserve(heading); }
+        });
+      }, { threshold: 0.3 });
+      obs.observe(heading);
+    })();
+
+    // ===== LETTER WIND-UP (roadmap heading) =====
+    (function setupLetterWindup() {
+      var heading = document.getElementById('eventsHeading');
+      if (!heading) return;
+      if (REDUCE) { heading.classList.add('wound'); return; }
+      var obs = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) { if (e.isIntersecting) { heading.classList.add('wound'); obs.unobserve(heading); } });
+      }, { threshold: 0.5 });
+      obs.observe(heading);
+    })();
+
+    // ===== HOW-IT-WORKS REVEAL + orbit chips =====
+    (function setupHow() {
+      var visual = document.getElementById('howVisual');
+      var lines = document.querySelectorAll('.how-text-line');
+      // orbiting xStock "planets" grouped by allocation bucket [ticker, radius(cqw), speed(s), startDeg, group, reverse]
+      if (visual) {
+        var PLANETS = [
+          ['METAx', 18, 24, 20,  'growth', false],
+          ['Vx',    18, 28, 200, 'yield', true],
+          ['NVDAx', 28, 38, 70,  'growth', false],
+          ['SPYx',  28, 44, 165, 'yield', true],
+          ['KOx',   28, 50, 285, 'protection', false],
+          ['TSLAx', 38, 58, 30,  'growth', true],
+          ['QQQx',  38, 64, 120, 'yield', false],
+          ['JNJx',  38, 70, 205, 'protection', true],
+          ['AMZNx', 38, 76, 320, 'growth', false]
+        ];
+        PLANETS.forEach(function (p) {
+          var el = document.createElement('div');
+          el.className = 'orbit-chip g-' + p[4] + (p[5] ? ' rev' : '');
+          el.setAttribute('data-tk', p[0]);
+          el.style.setProperty('--rad', p[1] + 'cqw');
+          el.style.setProperty('--sp', p[2] + 's');
+          el.style.setProperty('--start', p[3] + 'deg');
+          var im = document.createElement('img'); im.src = 'logos/' + p[0] + '.png'; im.alt = p[0]; im.loading = 'lazy';
+          el.appendChild(im); visual.appendChild(el);
+        });
+      }
+      var reveal = function () {
+        if (visual) { visual.classList.add('revealed'); setTimeout(function () { visual.classList.add('rebalanced'); }, REDUCE ? 0 : 500); }
+        lines.forEach(function (el) { el.classList.add('revealed'); });
+      };
+      if (REDUCE) { reveal(); return; }
+      var section = document.getElementById('how');
+      var obs = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) { if (e.isIntersecting) { reveal(); obs.unobserve(e.target); } });
+      }, { threshold: 0.2 });
+      if (section) obs.observe(section);
+    })();
+
+    // ===== FOOTER / CTA REVEAL =====
+    (function setupFooterReveal() {
+      var els = document.querySelectorAll('.footer-reveal');
+      if (REDUCE) { els.forEach(function (el) { el.classList.add('revealed'); }); return; }
+      var obs = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('revealed'); obs.unobserve(e.target); } });
+      }, { threshold: 0.2 });
+      els.forEach(function (el) { obs.observe(el); });
+    })();
+
+    // ===== xSTOCKS CATALOG (data + filter) =====
+    (function buildCatalog() {
+      var DATA = [
+        { tk: 'NVDAx', name: 'NVIDIA Corp.', sector: 'tech', price: '172.41', chg: '+2.8%' },
+        { tk: 'AAPLx', name: 'Apple Inc.', sector: 'tech', price: '228.19', chg: '+0.9%' },
+        { tk: 'MSFTx', name: 'Microsoft Corp.', sector: 'tech', price: '447.62', chg: '+1.2%' },
+        { tk: 'SPYx', name: 'S&P 500 ETF', sector: 'index', price: '583.04', chg: '+0.4%' },
+        { tk: 'QQQx', name: 'Nasdaq-100 ETF', sector: 'index', price: '498.77', chg: '+0.6%' },
+        { tk: 'TSLAx', name: 'Tesla Inc.', sector: 'consumer', price: '346.20', chg: '-1.4%' },
+        { tk: 'AMZNx', name: 'Amazon.com Inc.', sector: 'consumer', price: '201.35', chg: '+1.1%' },
+        { tk: 'JPMx', name: 'JPMorgan Chase', sector: 'finance', price: '241.88', chg: '+0.3%' },
+        { tk: 'Vx', name: 'Visa Inc.', sector: 'finance', price: '312.50', chg: '+0.7%' },
+        { tk: 'COINx', name: 'Coinbase Global', sector: 'crypto', price: '258.93', chg: '+4.2%' },
+        { tk: 'MSTRx', name: 'MicroStrategy', sector: 'crypto', price: '398.10', chg: '+5.6%' },
+        { tk: 'HOODx', name: 'Robinhood Markets', sector: 'crypto', price: '37.45', chg: '+3.1%' }
+      ];
+      var grid = document.getElementById('catalogGrid');
+      var frag = document.createDocumentFragment();
+      DATA.forEach(function (d) {
+        var dir = d.chg.charAt(0) === '-' ? 'down' : 'up';
+        var el = document.createElement('article');
+        el.className = 'stock-tile';
+        el.setAttribute('data-sector', d.sector);
+        el.innerHTML =
+          '<div class="stock-tile-top">' +
+            '<img class="stock-logo" src="logos/' + d.tk + '.png" alt="' + d.tk + '" loading="lazy">' +
+            '<div><div class="stock-ticker">' + d.tk + '</div><div class="stock-sector">' + d.sector + '</div></div>' +
+          '</div>' +
+          '<div class="stock-name">' + d.name + '</div>' +
+          '<div class="stock-meta"><span class="stock-price">$' + d.price + '</span><span class="stock-chg ' + dir + '">' + d.chg + '</span></div>';
+        frag.appendChild(el);
+      });
+      grid.appendChild(frag);
+
+      var pills = document.querySelectorAll('.filter-pill');
+      var tiles = document.querySelectorAll('.stock-tile');
+      pills.forEach(function (pill) {
+        pill.addEventListener('click', function () {
+          pills.forEach(function (p) { p.classList.remove('active'); });
+          pill.classList.add('active');
+          var f = pill.dataset.filter;
+          tiles.forEach(function (t) { t.style.display = (f === 'all' || t.dataset.sector === f) ? '' : 'none'; });
+        });
+      });
+    })();
+  </script>
+</body>
+</html>
