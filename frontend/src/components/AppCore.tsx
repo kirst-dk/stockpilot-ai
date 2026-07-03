@@ -39,7 +39,11 @@ const BRIDGE_DEFAULT_TO = {
 };
 
 const CONTRACT = "0xbbE80ACe5c46b49930ff0229762a1A57BE4CA6F4";
-// ERC-8004 agent identity + reputation + verifiable-AI rationale anchor (Mantle Mainnet)
+// Canonical ERC-8004 IdentityRegistry (shared singleton) — agent registered as agentId 143 on Mantle
+const ERC8004_REGISTRY = "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432";
+const ERC8004_AGENT_ID = 143;
+const ERC8004_SCAN = "https://8004scan.io/agents/mantle/143";
+// Custom identity contract: on-chain reputation + verifiable-AI rationale anchor (Mantle Mainnet)
 const IDENTITY_CONTRACT = "0x98611629c106FCf8Dc35A28a2db3a59638DB237a";
 // RWA / AI Yield Optimizer (USDY) — Mantle Mainnet addresses
 const USDY_ORACLE = "0xA96abbe61AfEdEB0D14a20440Ae7100D9aB4882f";
@@ -4073,14 +4077,17 @@ export function AutopilotTabContent() {
         )}
         <div className="mt-3 space-y-1.5">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border border-violet-500/30 bg-violet-500/10 text-violet-200">ERC-8004 Identity #1</span>
-            <span className="text-[9px] text-white/35">on-chain agent identity + reputation + verifiable-AI rationale anchor</span>
+            <a href={ERC8004_SCAN} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border border-violet-500/30 bg-violet-500/10 text-violet-200 hover:border-violet-400/60">ERC-8004 Agent #{ERC8004_AGENT_ID} · verified on 8004scan</a>
+            <span className="text-[9px] text-white/35">canonical on-chain agent identity + reputation + verifiable-AI rationale anchor</span>
+          </div>
+          <div className="text-[9px] font-mono text-white/30 break-all">
+            Registry: <a href={`https://mantlescan.xyz/address/${ERC8004_REGISTRY}`} target="_blank" rel="noreferrer" className="hover:text-violet-300">{ERC8004_REGISTRY}</a> · agentId {ERC8004_AGENT_ID}
           </div>
           <div className="text-[9px] font-mono text-white/30 break-all">
             Agent: <a href={`https://mantlescan.xyz/address/${CONTRACT}`} target="_blank" rel="noreferrer" className="hover:text-white/60">{CONTRACT}</a>
           </div>
           <div className="text-[9px] font-mono text-white/30 break-all">
-            Identity: <a href={`https://mantlescan.xyz/address/${IDENTITY_CONTRACT}#code`} target="_blank" rel="noreferrer" className="hover:text-violet-300">{IDENTITY_CONTRACT}</a>
+            Reputation/Anchor: <a href={`https://mantlescan.xyz/address/${IDENTITY_CONTRACT}#code`} target="_blank" rel="noreferrer" className="hover:text-violet-300">{IDENTITY_CONTRACT}</a>
           </div>
         </div>
       </div>
