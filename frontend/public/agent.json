@@ -1,18 +1,31 @@
 {
+  "type": "https://eips.ethereum.org/EIPS/eip-8004",
   "name": "StockPilot Autonomous RWA Agent",
   "description": "Autonomous, non-custodial AI agent that manages a 3-layer RWA portfolio (xStocks growth / USDY treasuries / mETH yield) on Mantle, records every allocation decision on-chain, and anchors a verifiable hash of its AI rationale.",
+  "image": "https://app.stockpilotai.xyz/icon.png",
   "version": "1.0.0",
   "standard": "ERC-8004",
   "chainId": 5000,
   "network": "Mantle",
+  "registrations": [
+    {
+      "agentRegistry": "eip155:5000:0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      "agentId": 143
+    }
+  ],
+  "supportedTrust": ["reputation"],
   "identity": {
-    "registry": "0x98611629c106FCf8Dc35A28a2db3a59638DB237a",
-    "agentId": 1,
-    "operator": "0x25F8d05F345d03F94d42cEe5F795eeC6478919cF"
+    "canonicalRegistry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+    "agentId": 143,
+    "operator": "0x25F8d05F345d03F94d42cEe5F795eeC6478919cF",
+    "explorer": "https://8004scan.io/agents/mantle/143",
+    "customRegistry": "0x98611629c106FCf8Dc35A28a2db3a59638DB237a",
+    "customAgentId": 1
   },
   "contracts": {
     "agent": "0xbbE80ACe5c46b49930ff0229762a1A57BE4CA6F4",
-    "identity": "0x98611629c106FCf8Dc35A28a2db3a59638DB237a",
+    "identityCanonical": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+    "identityCustom": "0x98611629c106FCf8Dc35A28a2db3a59638DB237a",
     "swapHelper": "0xe2c17E812f506e1A2723618e787eE61B9E30470f"
   },
   "capabilities": [
@@ -23,6 +36,10 @@
     "pre-trade-compliance-gate"
   ],
   "signals": ["Nansen smart-money", "ELFA sentiment", "AltLLM reasoning", "USDY on-chain yield oracle", "volatility proxy"],
+  "services": [
+    { "type": "web", "url": "https://app.stockpilotai.xyz" },
+    { "type": "status", "url": "https://app.stockpilotai.xyz/api/autopilot/status" }
+  ],
   "endpoints": {
     "app": "https://app.stockpilotai.xyz",
     "status": "https://app.stockpilotai.xyz/api/autopilot/status"
