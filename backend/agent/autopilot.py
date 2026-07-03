@@ -37,6 +37,7 @@ from strategies.rwa_balanced import (
 )
 from agent.portfolio_reader import read_agent_portfolio
 from agent.swap_executor import execute_rebalance_swaps
+from agent.compliance import asset_compliance, screen_wallet
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,14 @@ AGENT_PRIVATE_KEY = os.getenv("AGENT_PRIVATE_KEY") or os.getenv("DEPLOYER_PRIVAT
 AGENT_IDENTITY_ADDRESS = os.getenv(
     "AGENT_IDENTITY_ADDRESS", "0x98611629c106FCf8Dc35A28a2db3a59638DB237a"
 )
+
+# On-chain, verifiable pre-trade compliance attestations (StockPilotComplianceAttestor).
+COMPLIANCE_ATTESTOR_ADDRESS = os.getenv(
+    "COMPLIANCE_ATTESTOR_ADDRESS", "0x6d8aADb868CF8d2C7031d593D78b11119D0f3e72"
+)
+# Self-declared jurisdiction the compliance gate is evaluated against each cycle. xStocks/USDY
+# are tokenized securities (not for US persons); default to a permitted jurisdiction.
+AUTOPILOT_REGION = os.getenv("AUTOPILOT_REGION", "CH")
 
 # Three-layer tokens on Mantle.
 USDY_TOKEN = os.getenv("USDY_TOKEN_ADDRESS", "0x5bE26527e817998A7206475496fDE1E68957c5A6")
@@ -118,6 +127,37 @@ IDENTITY_ABI = [
         "stateMutability": "view",
         "inputs": [],
         "outputs": [{"name": "", "type": "uint256"}],
+    },
+]
+
+# Minimal ABI for the on-chain compliance attestor.
+COMPLIANCE_ABI = [
+    {
+        "name": "attestCompliance",
+        "type": "function",
+        "stateMutability": "nonpayable",
+        "inputs": [
+            {"name": "decisionRef", "type": "uint256"},
+            {"name": "passed", "type": "bool"},
+            {"name": "region", "type": "string"},
+            {"name": "blockedCount", "type": "uint16"},
+            {"name": "complianceHash", "type": "bytes32"},
+        ],
+        "outputs": [{"name": "attestationIndex", "type": "uint256"}],
+    },
+    {
+        "name": "getAttestationCount",
+        "type": "function",
+        "stateMutability": "view",
+        "inputs": [],
+        "outputs": [{"name": "", "type": "uint256"}],
+    },
+    {
+        "name": "verifyCompliance",
+        "type": "function",
+        "stateMutability": "view",
+        "inputs": [{"name": "report", "type": "string"}],
+        "outputs": [{"name": "", "type": "bool"}],
     },
 ]
 
@@ -200,6 +240,11 @@ class DecisionRecord:
     portfolio: Optional[dict] = None  # real on-chain holdings snapshot (live cycles)
     rationale_hash: Optional[str] = None  # keccak256(reason) committed on-chain (ERC-8004 anchor)
     anchor_tx_hash: Optional[str] = None  # tx that anchored the rationale hash on the identity contract
+    compliance_report: Optional[str] = None  # exact pre-trade compliance verdict string (hashed on-chain)
+    compliance_passed: Optional[bool] = None  # True when no leg was compliance-blocked this cycle
+    compliance_blocked: list = field(default_factory=list)  # layers blocked by the gate
+    compliance_hash: Optional[str] = None  # keccak256(compliance_report) committed on-chain
+    compliance_tx_hash: Optional[str] = None  # tx that attested the compliance verdict on-chain
 
 
 # --- Signal gathering ---
@@ -703,6 +748,99 @@ def anchor_rationale_onchain(decision_ref: int, reason: str) -> tuple[Optional[s
         return None, None
 
 
+def build_compliance_verdict(
+    region: str, wallet: Optional[str], layers: tuple[int, int, int]
+) -> dict:
+    """Run the pre-trade compliance gate for this cycle and produce a deterministic verdict.
+
+    Evaluates each funded layer (xStocks / USDY / mETH) for jurisdictional eligibility in the
+    self-declared ``region`` and screens the agent wallet against the sanctions denylist. Returns
+    a dict with the exact human-readable ``report`` string (the thing hashed on-chain), the pass
+    flag, and the list of blocked layers. The report is reproducible so anyone can call
+    ``verifyCompliance(report)`` on-chain and get MATCH.
+    """
+    wallet_scan = screen_wallet(wallet)
+    sanctioned = bool(wallet_scan.get("sanctioned"))
+    # Map the three layers to their compliance module keys; only evaluate funded legs.
+    layer_map = [("xstocks", layers[0]), ("usdy", layers[1]), ("meth", layers[2])]
+    parts: list[str] = []
+    blocked: list[str] = []
+    for key, weight in layer_map:
+        if weight <= 0:
+            continue
+        ac = asset_compliance(key, region)
+        restricted = bool(ac["restricted"]) or sanctioned
+        if restricted:
+            blocked.append(key)
+        verdict = "BLOCKED" if restricted else "OK"
+        parts.append(f"{key}:{verdict}")
+    passed = len(blocked) == 0
+    wallet_str = (wallet or "unknown").lower()
+    wallet_state = "sanctioned" if sanctioned else "cleared"
+    report = (
+        f"StockPilot pre-trade compliance | region={(region or 'unspecified').upper()} "
+        f"| wallet={wallet_str}:{wallet_state} | " + " | ".join(parts)
+        + f" | blocked={blocked or '[]'}"
+    )
+    return {"report": report, "passed": passed, "blocked": blocked, "blocked_count": len(blocked)}
+
+
+def attest_compliance_onchain(
+    decision_ref: int, passed: bool, region: str, blocked_count: int, report: str
+) -> tuple[Optional[str], Optional[str]]:
+    """Commit keccak256(report) as a compliance attestation on-chain. Returns (hash, tx_hash).
+
+    This makes the compliance gate independently verifiable: the exact verdict the UI shows is
+    hashed and committed next to the decision, so anyone can call ``verifyCompliance(report)`` and
+    get MATCH. Runs synchronously (web3); callers should offload via ``asyncio.to_thread``.
+    """
+    if not AGENT_PRIVATE_KEY or not COMPLIANCE_ATTESTOR_ADDRESS:
+        return None, None
+    try:
+        w3 = Web3(Web3.HTTPProvider(MANTLE_RPC_URL, request_kwargs={"timeout": 30}))
+        acct = w3.eth.account.from_key(AGENT_PRIVATE_KEY)
+        compliance_hash = Web3.keccak(text=report)
+        contract = w3.eth.contract(
+            address=Web3.to_checksum_address(COMPLIANCE_ATTESTOR_ADDRESS), abi=COMPLIANCE_ABI
+        )
+        nonce = w3.eth.get_transaction_count(acct.address, "pending")
+        last_err: Optional[Exception] = None
+        for _attempt in range(6):
+            tx = contract.functions.attestCompliance(
+                int(decision_ref), bool(passed), (region or "unspecified").upper(),
+                int(blocked_count), compliance_hash,
+            ).build_transaction({
+                "from": acct.address,
+                "nonce": nonce,
+                "gas": 300000,
+                "gasPrice": w3.eth.gas_price,
+                "chainId": 5000,
+            })
+            signed = acct.sign_transaction(tx)
+            raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
+            try:
+                tx_hash = w3.eth.send_raw_transaction(raw)
+            except Exception as send_err:  # noqa: BLE001
+                last_err = send_err
+                suggested = _parse_next_nonce(str(send_err))
+                nonce = suggested if (suggested is not None and suggested != nonce) else nonce + 1
+                continue
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+            h = receipt.transactionHash.hex()
+            if not h.startswith("0x"):
+                h = "0x" + h
+            hh = compliance_hash.hex()
+            if not hh.startswith("0x"):
+                hh = "0x" + hh
+            logger.info("attestCompliance tx mined: %s (status=%s)", h, receipt.status)
+            return hh, h
+        logger.error("On-chain attestCompliance failed after retries: %s", last_err)
+        return None, None
+    except Exception as e:  # noqa: BLE001
+        logger.error("On-chain attestCompliance failed: %s", e)
+        return None, None
+
+
 # --- The agent ---
 
 class AutopilotAgent:
@@ -755,6 +893,7 @@ class AutopilotAgent:
             "live_swaps": LIVE_SWAPS,
             "contract": STOCKPILOT_CONTRACT_ADDRESS,
             "identity_contract": AGENT_IDENTITY_ADDRESS,
+            "compliance_contract": COMPLIANCE_ATTESTOR_ADDRESS,
             "agent_id": 1,
             "agent_wallet": self.agent_address(),
             "agent_funded": self._funded_flag(),
@@ -827,21 +966,34 @@ class AutopilotAgent:
                     AGENT_PRIVATE_KEY, portfolio_snapshot, layers, intra, self.symbols,
                 )
 
+            # Pre-trade compliance gate: evaluate every funded layer for jurisdictional
+            # eligibility + screen the agent wallet, producing a deterministic verdict that is
+            # committed on-chain (verifiable compliance, not a claim).
+            verdict = build_compliance_verdict(AUTOPILOT_REGION, self.agent_address(), layers)
+
             tx_hash = None
             rationale_hash = None
             anchor_tx_hash = None
+            compliance_hash = None
+            compliance_tx_hash = None
             if record:
                 tx_hash = await asyncio.to_thread(record_decision_onchain, regime, layers, reason)
                 if tx_hash:
-                    # Anchor keccak256(reason) on the ERC-8004 identity contract so the
-                    # rationale is independently verifiable (verifiable AI, not a black box).
                     try:
                         decision_ref = await asyncio.to_thread(_read_decision_count)
                         decision_ref = max(0, decision_ref - 1)
                     except Exception:  # noqa: BLE001
                         decision_ref = 0
+                    # Anchor keccak256(reason) on the ERC-8004 identity contract so the
+                    # rationale is independently verifiable (verifiable AI, not a black box).
                     rationale_hash, anchor_tx_hash = await asyncio.to_thread(
                         anchor_rationale_onchain, decision_ref, reason
+                    )
+                    # Attest the compliance verdict on-chain so verifyCompliance(report) → MATCH.
+                    compliance_hash, compliance_tx_hash = await asyncio.to_thread(
+                        attest_compliance_onchain,
+                        decision_ref, verdict["passed"], AUTOPILOT_REGION,
+                        verdict["blocked_count"], verdict["report"],
                     )
 
             rec = DecisionRecord(
@@ -860,6 +1012,11 @@ class AutopilotAgent:
                 portfolio=portfolio_snapshot,
                 rationale_hash=rationale_hash,
                 anchor_tx_hash=anchor_tx_hash,
+                compliance_report=verdict["report"],
+                compliance_passed=verdict["passed"],
+                compliance_blocked=verdict["blocked"],
+                compliance_hash=compliance_hash,
+                compliance_tx_hash=compliance_tx_hash,
             )
             decision = asdict(rec)
             self.last_decision = decision

@@ -26,14 +26,22 @@
     "agent": "0xbbE80ACe5c46b49930ff0229762a1A57BE4CA6F4",
     "identityCanonical": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
     "identityCustom": "0x98611629c106FCf8Dc35A28a2db3a59638DB237a",
+    "complianceAttestor": "0x6d8aADb868CF8d2C7031d593D78b11119D0f3e72",
     "swapHelper": "0xe2c17E812f506e1A2723618e787eE61B9E30470f"
+  },
+  "compliance": {
+    "attestor": "0x6d8aADb868CF8d2C7031d593D78b11119D0f3e72",
+    "model": "Each autonomous cycle runs a pre-trade compliance gate (jurisdiction eligibility per RWA asset class + sanctioned-wallet screening), then commits keccak256 of the full verdict on-chain. Anyone can call verifyCompliance(report) and get MATCH — verifiable compliance, not a claim.",
+    "verify": "verifyCompliance(string report) -> bool",
+    "explorer": "https://mantlescan.xyz/address/0x6d8aADb868CF8d2C7031d593D78b11119D0f3e72#code"
   },
   "capabilities": [
     "regime-classification",
     "3-layer-rwa-allocation",
     "onchain-decision-logging",
     "verifiable-ai-rationale-anchor",
-    "pre-trade-compliance-gate"
+    "pre-trade-compliance-gate",
+    "onchain-compliance-attestation"
   ],
   "signals": ["Nansen smart-money", "ELFA sentiment", "AltLLM reasoning", "USDY on-chain yield oracle", "volatility proxy"],
   "services": [
