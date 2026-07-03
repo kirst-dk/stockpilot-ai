@@ -1,0 +1,1219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StockPilot AI — AI-Powered Portfolio Manager on Mantle</title>
+<meta name="description" content="AI-powered autonomous portfolio manager for tokenized equities (xStocks) on Mantle Network. Bridge, build, analyze, and buy — all in one place.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232be8a6'/%3E%3Cpath d='M6 22L11 13L16 17L21 9L26 15' stroke='%23051014' stroke-width='3' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://api.fontshare.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f%5B%5D=clash-display@500,600,700&f%5B%5D=satoshi@400,500,700,900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#05070d; --bg2:#080c16; --panel:#0b1120;
+  --ink:#eaf0fa; --muted:#8a95ab; --faint:#5b6679;
+  --mint:#2be8a6; --mint-soft:rgba(43,232,166,.12); --mint-line:rgba(43,232,166,.28);
+  --blue:#4d8dff; --blue-soft:rgba(77,141,255,.12); --blue-line:rgba(77,141,255,.28);
+  --violet:#9d7bff; --violet-soft:rgba(157,123,255,.12);
+  --line:rgba(255,255,255,.08); --line-2:rgba(255,255,255,.05);
+  --card:rgba(255,255,255,.025);
+  --display:'Clash Display','Satoshi',system-ui,sans-serif;
+  --body:'Satoshi','Inter',system-ui,sans-serif;
+  --radius:18px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{font-family:var(--body);background:var(--bg);color:var(--ink);line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+::-webkit-scrollbar{width:8px}
+::-webkit-scrollbar-track{background:var(--bg2)}
+::-webkit-scrollbar-thumb{background:#1c2434;border-radius:4px}
+::selection{background:rgba(43,232,166,.25)}
+
+/* Atmospheric background */
+.bg-fx{position:fixed;inset:0;z-index:-2;overflow:hidden;pointer-events:none}
+.bg-fx .mesh{position:absolute;border-radius:50%;filter:blur(80px);opacity:.5}
+.bg-fx .m1{top:-220px;left:50%;transform:translateX(-55%);width:760px;height:760px;background:radial-gradient(circle,rgba(43,232,166,.16),transparent 65%)}
+.bg-fx .m2{top:38%;right:-180px;width:560px;height:560px;background:radial-gradient(circle,rgba(77,141,255,.14),transparent 65%)}
+.bg-fx .m3{bottom:-200px;left:-160px;width:620px;height:620px;background:radial-gradient(circle,rgba(43,232,166,.08),transparent 65%)}
+.bg-grid{position:fixed;inset:0;z-index:-2;opacity:.025;background-image:linear-gradient(rgba(255,255,255,.6) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.6) 1px,transparent 1px);background-size:64px 64px;-webkit-mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 40%,transparent 100%);mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 40%,transparent 100%)}
+.bg-noise{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.035;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+
+/* Shared full-viewport WebGL canvas (Block 1 portal + Block 2 token stream) */
+#scene3d{position:fixed;inset:0;z-index:0;pointer-events:none}
+#scene3d canvas{display:block;width:100%!important;height:100%!important}
+
+/* Navbar */
+nav{position:fixed;top:0;width:100%;z-index:100;backdrop-filter:blur(20px);background:rgba(5,7,13,.65);border-bottom:1px solid var(--line-2);padding:0 28px;transition:background .3s}
+.nav-inner{max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;height:72px}
+.logo{display:flex;align-items:center;gap:11px;text-decoration:none}
+.logo-icon{width:36px;height:36px;border-radius:11px;background:linear-gradient(135deg,var(--mint),#13b886);display:flex;align-items:center;justify-content:center;box-shadow:0 6px 20px rgba(43,232,166,.35)}
+.logo-text{font-family:var(--display);font-size:19px;font-weight:700;color:#fff;letter-spacing:-.3px}
+.logo-badge{font-size:9px;font-weight:700;color:var(--mint);background:var(--mint-soft);padding:3px 8px;border-radius:12px;border:1px solid var(--mint-line)}
+.nav-links{display:flex;align-items:center;gap:34px}
+.nav-links a{color:var(--muted);text-decoration:none;font-size:14px;font-weight:500;transition:color .2s}
+.nav-links a:hover{color:#fff}
+.btn-launch{background:linear-gradient(135deg,var(--mint),#16c08e);color:#04130d;padding:11px 22px;border-radius:12px;font-weight:700;font-size:14px;text-decoration:none;transition:all .25s;box-shadow:0 6px 20px rgba(43,232,166,.28)}
+.btn-launch:hover{transform:translateY(-2px);box-shadow:0 10px 30px rgba(43,232,166,.42)}
+@media(max-width:860px){.nav-links{display:none}}
+
+/* Hero (Block 1) */
+.hero{position:relative;z-index:1;min-height:100vh;display:flex;align-items:center;justify-content:center;text-align:center;padding:128px 24px 72px;overflow:hidden}
+.hero-fallback{position:fixed;inset:0;z-index:0;display:none;align-items:center;justify-content:center;pointer-events:none}
+.hero-fallback .ring{width:min(60vw,420px);aspect-ratio:1;border-radius:50%;border:2px solid var(--mint-line);box-shadow:0 0 120px 20px rgba(43,232,166,.18),inset 0 0 80px rgba(43,232,166,.12)}
+.hero-content{position:relative;z-index:2;max-width:820px;pointer-events:none}
+.hero-content::before{content:'';position:absolute;inset:-18% -22%;z-index:-1;background:radial-gradient(ellipse 64% 72% at 50% 46%,rgba(5,7,13,.88),rgba(5,7,13,.58) 48%,transparent 78%);pointer-events:none}
+.hero-content a,.hero-content .hero-cta{pointer-events:auto}
+.hero-badge{display:inline-flex;align-items:center;gap:8px;padding:7px 16px;border-radius:24px;background:var(--mint-soft);border:1px solid var(--mint-line);font-size:13px;font-weight:600;color:var(--mint);margin-bottom:26px;backdrop-filter:blur(8px)}
+.hero-badge .dot{width:6px;height:6px;border-radius:50%;background:var(--mint);box-shadow:0 0 10px var(--mint);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.hero h1{font-family:var(--display);font-size:clamp(2.6rem,6.4vw,5rem);font-weight:600;letter-spacing:-1.5px;line-height:1.04;margin-bottom:22px;text-shadow:0 2px 40px rgba(5,7,13,.6)}
+.hero h1 .grad{background:linear-gradient(120deg,var(--mint),#7af0c6 40%,var(--blue));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.hero p{font-size:clamp(1rem,1.6vw,1.2rem);color:#aeb7c8;max-width:560px;margin:0 auto 36px;line-height:1.7;text-shadow:0 2px 24px rgba(5,7,13,.8)}
+.hero-cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+.btn-primary{background:linear-gradient(135deg,var(--mint),#16c08e);color:#04130d;padding:15px 34px;border-radius:14px;font-weight:700;font-size:16px;text-decoration:none;transition:all .25s;display:inline-flex;align-items:center;gap:9px;box-shadow:0 8px 28px rgba(43,232,166,.32)}
+.btn-primary:hover{transform:translateY(-3px);box-shadow:0 14px 40px rgba(43,232,166,.46)}
+.btn-secondary{background:rgba(255,255,255,.04);color:#fff;padding:15px 30px;border-radius:14px;font-weight:600;font-size:16px;text-decoration:none;transition:all .25s;border:1px solid var(--line);backdrop-filter:blur(8px)}
+.btn-secondary:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.22)}
+.hero-stats{display:flex;justify-content:center;gap:46px;margin-top:56px;flex-wrap:wrap}
+.stat-value{font-family:var(--display);font-size:2rem;font-weight:600;background:linear-gradient(135deg,var(--mint),#8af0cd);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.stat-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1.6px;margin-top:4px;font-weight:600}
+.scroll-hint{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);z-index:2;color:var(--muted);font-size:12px;letter-spacing:1.5px;display:flex;flex-direction:column;align-items:center;gap:8px}
+.scroll-hint .mouse{width:22px;height:34px;border:1.5px solid var(--line);border-radius:12px;position:relative}
+.scroll-hint .mouse::before{content:'';position:absolute;top:6px;left:50%;transform:translateX(-50%);width:3px;height:6px;border-radius:2px;background:var(--mint);animation:scrolly 1.8s infinite}
+@keyframes scrolly{0%{opacity:0;top:6px}40%{opacity:1}100%{opacity:0;top:16px}}
+
+/* ===== New USDC-coin hero ===== */
+.hero{background:radial-gradient(ellipse 100% 92% at 50% 22%,#0c1830 0%,#070c16 54%,#05070d 100%)}
+.coin-field{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none}
+.coin-field::before{content:'';position:absolute;left:50%;top:46%;width:130%;height:120%;transform:translate(-50%,-50%);background:radial-gradient(circle,rgba(43,232,166,.10),transparent 60%);pointer-events:none}
+.coin{position:absolute;left:0;top:var(--y,50%);width:var(--sz,72px);height:var(--sz,72px);margin-top:calc(var(--sz,72px) / -2);will-change:transform;opacity:var(--op,1);filter:drop-shadow(0 16px 26px rgba(0,0,0,.55))}
+.coin .face{position:relative;width:100%;height:100%;border-radius:50%;box-shadow:0 0 0 1px rgba(120,180,255,.55),0 0 22px rgba(77,141,255,.4)}
+.coin .face img{width:100%;height:100%;display:block;border-radius:50%}
+.coin .shine{position:absolute;inset:0;border-radius:50%;background:linear-gradient(135deg,rgba(255,255,255,.6),transparent 44%);mix-blend-mode:screen;pointer-events:none}
+.coin.dir-r{animation:rollR var(--dur,16s) linear infinite}
+.coin.dir-l{animation:rollL var(--dur,16s) linear infinite}
+@keyframes rollR{from{transform:translateX(-16vw) rotate(0deg)}to{transform:translateX(116vw) rotate(var(--rot,1440deg))}}
+@keyframes rollL{from{transform:translateX(116vw) rotate(0deg)}to{transform:translateX(-16vw) rotate(calc(-1 * var(--rot,1440deg)))}}
+
+/* Framer-style staggered entrance */
+.fade-up{animation:fadeUp .7s cubic-bezier(.22,1,.36,1) both}
+.fade-up.fd1{animation-delay:.05s}.fade-up.fd2{animation-delay:.2s}.fade-up.fd3{animation-delay:.35s}.fade-up.fd4{animation-delay:.5s}
+@keyframes fadeUp{from{opacity:0;transform:translateY(28px)}to{opacity:1;transform:none}}
+
+/* inline heading icons */
+.hi{width:.82em;height:.82em;vertical-align:-.07em;margin:0 .1em;color:var(--mint)}
+
+/* mobile nav sheet */
+.nav-burger{display:none;width:42px;height:42px;border-radius:11px;background:rgba(255,255,255,.05);border:1px solid var(--line);color:#fff;align-items:center;justify-content:center;cursor:pointer}
+.nav-sheet{position:fixed;inset:0;z-index:200;visibility:hidden;opacity:0;transition:opacity .3s,visibility .3s}
+.nav-sheet.open{visibility:visible;opacity:1}
+.nav-sheet .backdrop{position:absolute;inset:0;background:rgba(5,7,13,.55);backdrop-filter:blur(6px)}
+.nav-sheet .panel{position:absolute;top:0;right:0;height:100%;width:min(86vw,340px);background:linear-gradient(180deg,#0a1018,#070b13);border-left:1px solid var(--line);box-shadow:-18px 0 60px rgba(0,0,0,.5);transform:translateX(100%);transition:transform .42s cubic-bezier(.22,1,.36,1);display:flex;flex-direction:column;padding:22px}
+.nav-sheet.open .panel{transform:none}
+.nav-sheet .sheet-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.nav-sheet .sheet-close{width:40px;height:40px;border-radius:10px;background:rgba(255,255,255,.05);border:1px solid var(--line);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.nav-sheet .divider{height:1px;background:var(--line);margin:2px 0 14px}
+.nav-sheet .sheet-links{display:flex;flex-direction:column;gap:2px}
+.nav-sheet .sheet-links a{color:#cdd5e3;text-decoration:none;font-size:17px;font-weight:600;padding:13px 8px;border-radius:10px;transition:background .2s,color .2s}
+.nav-sheet .sheet-links a:hover{background:rgba(255,255,255,.05);color:#fff}
+.nav-sheet .sheet-cta{margin-top:auto;display:flex;flex-direction:column;gap:10px;padding-top:18px}
+.nav-sheet .sheet-cta a{text-align:center}
+@media(max-width:860px){.nav-burger{display:flex}}
+
+/* ===== Block 2 — Infinite Token Stream (3D backdrop) ===== */
+.b2hero{position:relative;z-index:1;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:120px 24px 96px;overflow:hidden}
+.b2hero::before{content:'';position:absolute;inset:0;z-index:1;background:radial-gradient(ellipse 64% 56% at 50% 50%,rgba(5,7,13,.82),rgba(5,7,13,.42) 52%,transparent 80%);pointer-events:none}
+.b2-inner{position:relative;z-index:2;max-width:900px;pointer-events:none}
+.b2-inner a{pointer-events:auto}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;padding:7px 16px;border-radius:24px;background:var(--mint-soft);border:1px solid var(--mint-line);font-size:13px;font-weight:600;color:var(--mint);margin-bottom:22px;backdrop-filter:blur(8px)}
+.eyebrow.blue{background:var(--blue-soft);border-color:var(--blue-line);color:var(--blue)}
+.b2hero h2{font-family:var(--display);font-size:clamp(2.2rem,5.6vw,4.2rem);font-weight:600;letter-spacing:-1.3px;line-height:1.04;margin-bottom:20px;text-shadow:0 2px 40px rgba(5,7,13,.6)}
+.b2hero h2 .grad{background:linear-gradient(120deg,var(--mint),#7af0c6 45%,var(--blue));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.b2hero p{font-size:clamp(1rem,1.6vw,1.18rem);color:#aeb7c8;max-width:640px;margin:0 auto 30px;line-height:1.7;text-shadow:0 2px 24px rgba(5,7,13,.8)}
+.b2-cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+.b2-chips{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:46px}
+.b2-chip{display:flex;flex-direction:column;align-items:center;gap:3px;padding:16px 26px;border-radius:16px;background:rgba(255,255,255,.045);border:1px solid var(--line);backdrop-filter:blur(12px)}
+.b2-chip b{font-family:var(--display);font-size:1.55rem;font-weight:600;background:linear-gradient(135deg,var(--mint),#8af0cd);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.b2-chip span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1.4px;font-weight:600}
+
+/* opaque page body that scrolls over the fixed canvas */
+.page-body{position:relative;z-index:1;background:linear-gradient(180deg,rgba(5,7,13,0) 0%,rgba(5,7,13,.85) 9%,var(--bg) 18%,var(--bg) 100%)}
+
+/* Sections */
+section{padding:104px 24px}
+.section-inner{max-width:1200px;margin:0 auto}
+.section-head{text-align:center;max-width:720px;margin:0 auto 56px}
+.section-label{font-size:12px;font-weight:700;color:var(--mint);text-transform:uppercase;letter-spacing:2.4px;margin-bottom:14px}
+.section-title{font-family:var(--display);font-size:clamp(2rem,4vw,3.1rem);font-weight:600;letter-spacing:-1px;margin-bottom:16px;color:#fff;line-height:1.1}
+.section-desc{font-size:16px;color:var(--muted);max-width:600px;line-height:1.7}
+
+/* Glass card primitive */
+.glass{background:linear-gradient(160deg,rgba(255,255,255,.055),rgba(255,255,255,.015));border:1px solid var(--line);border-radius:20px;backdrop-filter:blur(12px)}
+
+/* Platform Overview (features) */
+.features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:18px;margin-top:48px}
+.feature-card{padding:30px;border-radius:var(--radius);background:var(--card);border:1px solid var(--line);transition:all .3s;position:relative;overflow:hidden}
+.feature-card::after{content:'';position:absolute;inset:0;border-radius:var(--radius);background:radial-gradient(420px circle at var(--mx,50%) var(--my,0%),rgba(43,232,166,.10),transparent 45%);opacity:0;transition:opacity .3s;pointer-events:none}
+.feature-card:hover{border-color:var(--mint-line);transform:translateY(-4px)}
+.feature-card:hover::after{opacity:1}
+.feature-icon{width:50px;height:50px;border-radius:14px;display:flex;align-items:center;justify-content:center;margin-bottom:20px;background:var(--mint-soft);border:1px solid var(--mint-line);color:var(--mint)}
+.feature-icon.blue{background:var(--blue-soft);border-color:var(--blue-line);color:var(--blue)}
+.feature-icon.violet{background:var(--violet-soft);border-color:rgba(157,123,255,.28);color:var(--violet)}
+.feature-card h3{font-family:var(--display);font-size:18px;font-weight:600;margin-bottom:9px;color:#fff}
+.feature-card p{font-size:14px;color:var(--muted);line-height:1.65}
+.feature-tag{display:inline-block;font-size:11px;font-weight:700;padding:5px 11px;border-radius:8px;margin-top:14px;color:var(--mint);background:var(--mint-soft);border:1px solid var(--mint-line)}
+
+/* Tokenomics */
+.tok-wrap{display:grid;grid-template-columns:minmax(280px,1fr) minmax(320px,1.25fr);gap:28px;align-items:stretch;margin-top:48px}
+@media(max-width:860px){.tok-wrap{grid-template-columns:1fr}}
+.tok-donut{padding:38px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px}
+.donut{position:relative;width:230px;height:230px}
+.donut svg{transform:rotate(-90deg);width:100%;height:100%}
+.donut .center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.donut .center b{font-family:var(--display);font-size:2rem;font-weight:600;color:#fff}
+.donut .center span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1.4px}
+.tok-legend{display:flex;flex-direction:column;gap:12px;width:100%}
+.tok-legend .row{display:flex;align-items:center;gap:12px;font-size:14px}
+.tok-legend .sw{width:12px;height:12px;border-radius:4px;flex-shrink:0}
+.tok-legend .row b{margin-left:auto;font-family:var(--display);font-weight:600;color:#fff}
+.tok-cards{display:flex;flex-direction:column;gap:18px}
+.tok-card{padding:26px;display:flex;gap:18px;align-items:flex-start}
+.tok-card .ic{width:46px;height:46px;border-radius:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:var(--mint-soft);border:1px solid var(--mint-line);color:var(--mint)}
+.tok-card .ic.blue{background:var(--blue-soft);border-color:var(--blue-line);color:var(--blue)}
+.tok-card h4{font-family:var(--display);font-size:17px;font-weight:600;color:#fff;margin-bottom:6px}
+.tok-card p{font-size:14px;color:var(--muted);line-height:1.6}
+.tok-card .pct{margin-left:auto;font-family:var(--display);font-size:1.4rem;font-weight:600;color:var(--mint)}
+
+/* Analytics */
+.an-grid{display:grid;grid-template-columns:1.4fr 1fr;gap:24px;margin-top:48px}
+@media(max-width:860px){.an-grid{grid-template-columns:1fr}}
+.an-chart{padding:30px}
+.an-chart .chart-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:10px}
+.an-chart h4{font-family:var(--display);font-size:18px;font-weight:600;color:#fff}
+.an-chart .delta{font-size:13px;font-weight:700;color:var(--mint);background:var(--mint-soft);border:1px solid var(--mint-line);padding:4px 10px;border-radius:8px}
+.an-chart .val{font-family:var(--display);font-size:2.2rem;font-weight:600;color:#fff;margin-bottom:14px}
+.an-chart svg{width:100%;height:170px;display:block}
+.an-metrics{display:grid;grid-template-rows:repeat(3,1fr);gap:18px}
+.an-metric{padding:24px;display:flex;flex-direction:column;justify-content:center}
+.an-metric .lbl{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1.4px;font-weight:600;margin-bottom:8px}
+.an-metric .num{font-family:var(--display);font-size:1.9rem;font-weight:600;color:#fff}
+.an-metric .sub{font-size:12px;color:var(--mint);margin-top:4px;font-weight:600}
+
+/* Onboarding steps */
+.steps-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px;margin-top:48px;counter-reset:step}
+.step-card{padding:28px;position:relative;overflow:hidden}
+.step-card .num{counter-increment:step;font-family:var(--display);font-size:13px;font-weight:700;color:var(--mint);background:var(--mint-soft);border:1px solid var(--mint-line);width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:18px}
+.step-card .num::before{content:'0' counter(step)}
+.step-card h4{font-family:var(--display);font-size:17px;font-weight:600;color:#fff;margin-bottom:8px}
+.step-card p{font-size:14px;color:var(--muted);line-height:1.6}
+.step-card .arr{position:absolute;top:30px;right:-12px;color:rgba(255,255,255,.14)}
+@media(max-width:760px){.step-card .arr{display:none}}
+
+/* Testimonials */
+.tst-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:18px;margin-top:48px}
+.tst-card{padding:30px;display:flex;flex-direction:column;gap:18px}
+.tst-card .quote{font-size:15px;color:#cdd5e3;line-height:1.7}
+.tst-card .who{display:flex;align-items:center;gap:13px;margin-top:auto}
+.tst-card .av{width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,var(--mint),var(--blue));display:flex;align-items:center;justify-content:center;font-family:var(--display);font-weight:700;color:#04130d;font-size:15px}
+.tst-card .who .nm{font-family:var(--display);font-weight:600;font-size:14px;color:#fff}
+.tst-card .who .rl{font-size:12px;color:var(--muted)}
+.tst-stars{color:var(--mint);letter-spacing:2px;font-size:14px}
+
+/* Assets strip */
+.assets-grid{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;max-width:920px;margin:48px auto 0}
+.asset-card{display:flex;align-items:center;gap:12px;padding:14px 20px;border-radius:14px;background:var(--card);border:1px solid var(--line);transition:all .25s}
+.asset-card:hover{border-color:var(--mint-line);transform:translateY(-3px)}
+.asset-card img{width:40px;height:40px;border-radius:50%;background:#fff}
+.asset-card .sym{font-family:var(--display);font-weight:600;font-size:16px;color:#fff}
+.asset-card .nm{font-size:11px;color:var(--muted)}
+.assets-more{text-align:center;margin-top:30px}
+.assets-more span{display:inline-flex;align-items:center;gap:8px;padding:9px 20px;border-radius:12px;background:var(--mint-soft);border:1px solid var(--mint-line);font-size:13px;color:var(--mint);font-weight:600}
+
+/* Partners */
+.partners-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-top:48px}
+.partner-card{padding:24px 16px;border-radius:15px;background:var(--card);border:1px solid var(--line);text-align:center;transition:all .25s}
+.partner-card:hover{border-color:var(--mint-line);transform:translateY(-3px)}
+.partner-card .name{font-family:var(--display);font-size:15px;font-weight:600;color:#fff;margin-bottom:4px}
+.partner-card .role{font-size:11px;color:var(--muted)}
+
+/* Contract */
+.contract-box{margin-top:44px;padding:30px;border-radius:var(--radius);background:var(--card);border:1px solid var(--line)}
+.contract-box .label{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
+.contract-box .address{font-size:14px;font-family:'Satoshi',monospace;color:var(--mint);word-break:break-all;font-weight:500}
+.contract-box .network{font-size:13px;color:var(--muted);margin-top:8px}
+.contract-box a{color:var(--blue);text-decoration:none;font-size:13px;font-weight:600}
+.contract-box a:hover{text-decoration:underline}
+
+/* CTA */
+.cta-section{text-align:center}
+.cta-box{max-width:720px;margin:0 auto;padding:60px 40px;border-radius:24px;background:linear-gradient(135deg,rgba(43,232,166,.08),rgba(77,141,255,.06));border:1px solid var(--mint-line);position:relative;overflow:hidden}
+.cta-box::before{content:'';position:absolute;top:-120px;left:50%;transform:translateX(-50%);width:360px;height:360px;background:radial-gradient(circle,rgba(43,232,166,.16),transparent 70%);border-radius:50%}
+.cta-box h2{position:relative;font-family:var(--display);font-size:clamp(1.8rem,3.4vw,2.6rem);font-weight:600;color:#fff;margin-bottom:14px;letter-spacing:-.5px}
+.cta-box p{position:relative;color:var(--muted);max-width:480px;margin:0 auto 30px}
+
+/* Footer */
+footer{position:relative;z-index:1;background:var(--bg);border-top:1px solid var(--line-2);padding:40px 24px}
+.footer-inner{max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap}
+.footer-links{display:flex;gap:26px;flex-wrap:wrap}
+.footer-links a{color:var(--muted);text-decoration:none;font-size:14px;font-weight:500;transition:color .2s}
+.footer-links a:hover{color:var(--mint)}
+.footer-copy{font-size:13px;color:var(--faint)}
+
+/* Reveal */
+.reveal{opacity:0;transform:translateY(26px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1)}
+.reveal.in{opacity:1;transform:none}
+
+@media(prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+  .reveal{opacity:1;transform:none}
+  .fade-up{opacity:1!important;transform:none!important}
+}
+@media(max-width:640px){
+  section{padding:72px 20px}
+  .hero-stats{gap:30px;margin-top:42px}
+  .footer-inner{flex-direction:column;text-align:center}
+}
+</style>
+</head>
+<body>
+
+<div class="bg-fx"><div class="mesh m1"></div><div class="mesh m2"></div><div class="mesh m3"></div></div>
+<div class="bg-grid"></div>
+<div class="bg-noise"></div>
+
+<!-- Shared WebGL canvas: Block 1 portal + Block 2 token stream -->
+<div id="scene3d"></div>
+<div class="hero-fallback"><div class="ring"></div></div>
+
+<!-- Navbar -->
+<nav>
+  <div class="nav-inner">
+    <a href="/" class="logo">
+      <div class="logo-icon"><svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M2 12L5 7L8 9L11 4L14 8" stroke="#04130d" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <span class="logo-text">StockPilot</span>
+      <span class="logo-badge">AI</span>
+    </a>
+    <div class="nav-links">
+      <a href="#stream">Tokens</a>
+      <a href="#overview">Platform</a>
+      <a href="#tokenomics">Autopilot</a>
+      <a href="#analytics">By the Numbers</a>
+      <a href="https://github.com/kirst-dk/stockpilot-ai" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://app.stockpilotai.xyz" class="btn-launch">Launch App</a>
+    </div>
+    <button class="nav-burger" id="navBurger" aria-label="Open menu"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+  </div>
+</nav>
+
+<!-- Mobile nav sheet -->
+<div class="nav-sheet" id="navSheet" aria-hidden="true">
+  <div class="backdrop" data-close></div>
+  <aside class="panel">
+    <div class="sheet-head">
+      <a href="/" class="logo">
+        <div class="logo-icon"><svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M2 12L5 7L8 9L11 4L14 8" stroke="#04130d" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <span class="logo-text">StockPilot</span>
+      </a>
+      <button class="sheet-close" data-close aria-label="Close menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div class="divider"></div>
+    <div class="sheet-links">
+      <a href="#stream">Tokens</a>
+      <a href="#overview">Platform</a>
+      <a href="#tokenomics">Autopilot</a>
+      <a href="#analytics">By the Numbers</a>
+      <a href="https://github.com/kirst-dk/stockpilot-ai" target="_blank" rel="noopener">GitHub</a>
+    </div>
+    <div class="sheet-cta">
+      <a href="https://app.stockpilotai.xyz" class="btn-primary">Launch App</a>
+      <a href="https://dorahacks.io/buidl/43884" target="_blank" rel="noopener" class="btn-secondary">View on DoraHacks</a>
+    </div>
+  </aside>
+</div>
+
+<!-- Hero (Block 1): rolling USDC coins -->
+<section class="hero">
+  <div class="coin-field" id="coinField" aria-hidden="true"></div>
+  <div class="hero-content">
+    <div class="hero-badge fade-up fd1"><span class="dot"></span> Live on Mantle Network · 155+ xStocks</div>
+    <h1 class="fade-up fd2"><svg class="hi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/></svg> Turn <span class="grad">USDC</span> <svg class="hi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></svg> into <span class="grad">Tokenized Stocks</span> <svg class="hi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 7h6v6"/><path d="m22 7-8.5 8.5-5-5L2 17"/></svg></h1>
+    <p class="fade-up fd3">Bridge from any chain, build your xStocks portfolio, get AI analysis, and trade on-chain — autonomously, on Mantle.</p>
+    <div class="hero-cta fade-up fd4">
+      <a href="https://app.stockpilotai.xyz" class="btn-primary">Launch App
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </a>
+      <a href="https://dorahacks.io/buidl/43884" target="_blank" rel="noopener" class="btn-secondary">View on DoraHacks</a>
+    </div>
+    <div class="hero-stats fade-up fd4">
+      <div class="stat"><div class="stat-value">155</div><div class="stat-label">xStocks Available</div></div>
+      <div class="stat"><div class="stat-value">65+</div><div class="stat-label">Bridge Networks</div></div>
+      <div class="stat"><div class="stat-value">3</div><div class="stat-label">AI Engines</div></div>
+      <div class="stat"><div class="stat-value">24/7</div><div class="stat-label">On-Chain</div></div>
+    </div>
+  </div>
+  <div class="scroll-hint"><div class="mouse"></div>SCROLL</div>
+</section>
+
+<!-- Block 2: Infinite Token Stream (3D backdrop renders behind via #scene3d) -->
+<section class="b2hero" id="stream">
+  <div class="b2-inner">
+    <div class="eyebrow blue"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg> Infinite Token Stream</div>
+    <h2>155+ <span class="grad">xStocks</span>, Flowing On-Chain 24/7</h2>
+    <p>Every major equity, ETF and crypto-treasury name — tokenized 1:1, orbiting in real time and tradable around the clock on Mantle.</p>
+    <div class="b2-cta">
+      <a href="https://app.stockpilotai.xyz" class="btn-primary">Explore Markets
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </a>
+      <a href="#analytics" class="btn-secondary">See Analytics</a>
+    </div>
+    <div class="b2-chips">
+      <div class="b2-chip"><b>155</b><span>Tokenized Equities</span></div>
+      <div class="b2-chip"><b>24/7</b><span>On-Chain Trading</span></div>
+      <div class="b2-chip"><b>1:1</b><span>Asset Backed</span></div>
+      <div class="b2-chip"><b>Mantle</b><span>L2 · ChainID 5000</span></div>
+    </div>
+  </div>
+</section>
+
+<div class="page-body">
+
+<!-- Platform Overview -->
+<section id="overview">
+  <div class="section-inner">
+    <div class="section-head">
+      <div class="section-label reveal">Platform Overview</div>
+      <h2 class="section-title reveal">Everything You Need to Invest in Tokenized Stocks</h2>
+      <p class="section-desc reveal" style="margin:0 auto">From cross-chain bridging to AI-powered analysis — StockPilot AI handles the complexity so you can focus on building wealth.</p>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17V9a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3"/><path d="M4 17a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3"/><path d="M9 12h6"/></svg></div>
+        <h3>Cross-Chain Bridge</h3>
+        <p>Bridge assets from any EVM chain to Mantle in one click via the on-page Relay.link widget — across 65+ networks, no external redirects.</p>
+        <span class="feature-tag">Relay.link · 65+ chains</span>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon blue"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg></div>
+        <h3>Portfolio Builder</h3>
+        <p>Select from 155+ tokenized equities. Set custom allocations or let AI choose the optimal strategy for your risk profile.</p>
+        <span class="feature-tag">xStocks + Fluxion</span>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon violet"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="7" width="16" height="13" rx="2"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/></svg></div>
+        <h3>AI Portfolio Analysis</h3>
+        <p>Get real-time risk scores, expected returns, and diversification ratings. AI evaluates your picks with on-chain data.</p>
+        <span class="feature-tag">ELFA · Nansen · AltLLM</span>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon blue"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.2A2.4 2.4 0 0 1 12 7.8c1.4 0 2.5.9 2.5 2M14.5 14.8A2.4 2.4 0 0 1 12 16.2c-1.4 0-2.5-.9-2.5-2"/></svg></div>
+        <h3>One-Click Purchase</h3>
+        <p>Buy your entire portfolio or individual xStocks with one click. Auto-swap any input token to USDC before purchase.</p>
+        <span class="feature-tag">USDC · USDT · WETH · MNT</span>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z"/><path d="M8 10h8M8 13h5"/></svg></div>
+        <h3>AI Chat Assistant</h3>
+        <p>Ask Stocky about strategies, risk analysis, or market conditions. Powered by ELFA AI + AltLLM with real market data.</p>
+        <span class="feature-tag">Stocky Concierge</span>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon violet"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12a3 3 0 0 0 3 3l3-3a3 3 0 0 0-3-3"/><path d="M14 8.5 16.5 6a3.5 3.5 0 0 1 5 5L19 13.5"/><path d="M10 15.5 7.5 18a3.5 3.5 0 0 1-5-5L5 10.5"/></svg></div>
+        <h3>On-Chain AI Track Record</h3>
+        <p>Every agent decision — regime, target weights and reasoning — is written to Mantle via recordDecision. A verifiable, tamper-proof track record on Mantlescan.</p>
+        <span class="feature-tag">recordDecision · Verified</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Tokenomics -->
+<section id="tokenomics" style="border-top:1px solid var(--line-2);background:linear-gradient(180deg,rgba(255,255,255,.012),transparent)">
+  <div class="section-inner">
+    <div class="section-head">
+      <div class="section-label reveal">The Autopilot Engine</div>
+      <h2 class="section-title reveal">Autonomous Allocation, Recorded On-Chain</h2>
+      <p class="section-desc reveal" style="margin:0 auto">StockPilot's agent splits capital across three layers and rebalances by market regime — every target written on-chain via recordDecision. The neutral baseline is 40 / 40 / 20.</p>
+    </div>
+    <div class="tok-wrap">
+      <div class="glass tok-donut reveal">
+        <div class="donut">
+          <svg viewBox="0 0 120 120">
+            <circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="14"/>
+            <circle class="seg" cx="60" cy="60" r="52" fill="none" stroke="#2be8a6" stroke-width="14" stroke-linecap="round" stroke-dasharray="0 327" data-len="131"/>
+            <circle class="seg" cx="60" cy="60" r="52" fill="none" stroke="#4d8dff" stroke-width="14" stroke-linecap="round" stroke-dasharray="0 327" data-len="131" data-off="131"/>
+            <circle class="seg" cx="60" cy="60" r="52" fill="none" stroke="#9d7bff" stroke-width="14" stroke-linecap="round" stroke-dasharray="0 327" data-len="65" data-off="262"/>
+          </svg>
+          <div class="center"><b>40/40/20</b><span>Neutral</span></div>
+        </div>
+        <div class="tok-legend">
+          <div class="row"><span class="sw" style="background:#2be8a6"></span> Growth · xStocks <b>40%</b></div>
+          <div class="row"><span class="sw" style="background:#4d8dff"></span> Protection · USDY <b>40%</b></div>
+          <div class="row"><span class="sw" style="background:#9d7bff"></span> Yield · mETH <b>20%</b></div>
+        </div>
+      </div>
+      <div class="tok-cards">
+        <div class="glass tok-card reveal">
+          <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6c0-1.7 4-3 9-3s9 1.3 9 3-4 3-9 3-9-1.3-9-3z"/><path d="M3 6v6c0 1.7 4 3 9 3s9-1.3 9-3V6"/><path d="M3 12v6c0 1.7 4 3 9 3s9-1.3 9-3v-6"/></svg></div>
+          <div><h4>Growth · xStocks</h4><p>3–5 tokenized equities (AAPLx, NVDAx, SPYx…). Overweighted up to 55% when signals turn risk-on.</p></div>
+          <div class="pct">20–55%</div>
+        </div>
+        <div class="glass tok-card reveal">
+          <div class="ic blue"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 6v6c0 5 3.4 8.5 8 10 4.6-1.5 8-5 8-10V6z"/><path d="m9 12 2 2 4-4"/></svg></div>
+          <div><h4>Protection · USDY</h4><p>Ondo tokenized US Treasuries — defensive ballast scaled to 65% when the market turns risk-off.</p></div>
+          <div class="pct">20–65%</div>
+        </div>
+        <div class="glass tok-card reveal">
+          <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12v9H4v-9"/><path d="M2 7h20v5H2z"/><path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg></div>
+          <div><h4>Yield · mETH</h4><p>Mantle staked-ETH held across every regime for passive staking yield. Guardrails enforced inside the contract.</p></div>
+          <div class="pct">15–25%</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Interactive Analytics -->
+<section id="analytics">
+  <div class="section-inner">
+    <div class="section-head">
+      <div class="section-label reveal">By the Numbers</div>
+      <h2 class="section-title reveal">Built Real, Verified On-Chain</h2>
+      <p class="section-desc reveal" style="margin:0 auto">No vanity metrics — just what's actually shipped: a live multi-route app, real DEX + bridge integrations, and an agent that records every decision on Mantle.</p>
+    </div>
+    <div class="an-grid">
+      <div class="glass an-chart reveal">
+        <div class="chart-head">
+          <h4>xStocks Universe</h4>
+          <span class="delta">Live on Mantle</span>
+        </div>
+        <div class="val" data-count="155">0</div>
+        <div style="color:var(--muted);font-size:13px;margin:-6px 0 16px">Tokenized equities — stocks, ETFs, energy, biotech &amp; crypto-treasuries, tradable 24/7</div>
+        <svg viewBox="0 0 600 170" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="areaG" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="rgba(43,232,166,.45)"/>
+              <stop offset="1" stop-color="rgba(43,232,166,0)"/>
+            </linearGradient>
+          </defs>
+          <path d="M0,140 L0,120 C40,118 70,96 110,100 C150,104 175,70 210,74 C250,78 280,52 320,44 C360,36 390,60 430,50 C470,40 500,22 540,26 C570,29 590,18 600,14 L600,140 Z" fill="url(#areaG)"/>
+          <path d="M0,120 C40,118 70,96 110,100 C150,104 175,70 210,74 C250,78 280,52 320,44 C360,36 390,60 430,50 C470,40 500,22 540,26 C570,29 590,18 600,14" fill="none" stroke="#2be8a6" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="an-metrics">
+        <div class="glass an-metric reveal"><div class="lbl">Bridge Networks</div><div class="num" data-count="65" data-suffix="+">0</div><div class="sub">via Relay.link</div></div>
+        <div class="glass an-metric reveal"><div class="lbl">AI Engines</div><div class="num" data-count="3">0</div><div class="sub">Nansen · ELFA · AltLLM</div></div>
+        <div class="glass an-metric reveal"><div class="lbl">App Routes</div><div class="num" data-count="7">0</div><div class="sub">Market · Swap · Bridge · Portfolio…</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- User Onboarding -->
+<section id="onboarding" style="border-top:1px solid var(--line-2);background:linear-gradient(180deg,rgba(255,255,255,.012),transparent)">
+  <div class="section-inner">
+    <div class="section-head">
+      <div class="section-label reveal">User Onboarding</div>
+      <h2 class="section-title reveal">From Any Wallet to xStocks in Minutes</h2>
+      <p class="section-desc reveal" style="margin:0 auto">Four simple steps — bridge, build, analyze and buy — fully on-chain on Mantle.</p>
+    </div>
+    <div class="steps-grid">
+      <div class="glass step-card reveal">
+        <div class="num"></div><h4>Connect & Bridge</h4><p>Connect any EVM wallet and bridge funds to Mantle as USDC in a single click via Relay.</p>
+        <svg class="arr" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </div>
+      <div class="glass step-card reveal">
+        <div class="num"></div><h4>Build Portfolio</h4><p>Pick from 155+ xStocks or let the AI compose an allocation tuned to your risk profile.</p>
+        <svg class="arr" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </div>
+      <div class="glass step-card reveal">
+        <div class="num"></div><h4>Analyze with AI</h4><p>Get instant risk scores, diversification ratings and expected returns from on-chain data.</p>
+        <svg class="arr" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </div>
+      <div class="glass step-card reveal">
+        <div class="num"></div><h4>Buy On-Chain</h4><p>Execute the whole basket in one transaction. Tokens land in your wallet, fully verifiable.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Testimonials -->
+<section id="testimonials">
+  <div class="section-inner">
+    <div class="section-head">
+      <div class="section-label reveal">Why It's Different</div>
+      <h2 class="section-title reveal">Verifiable, Not Just Claimed</h2>
+      <p class="section-desc reveal" style="margin:0 auto">The core of the Turing Test track: instead of trusting an AI's word, you can audit its entire decision history on-chain.</p>
+    </div>
+    <div class="tst-grid">
+      <div class="glass tst-card reveal">
+        <div class="tst-stars">ON-CHAIN</div>
+        <p class="quote">Every agent decision — regime, target weights and reasoning — is written to Mantle via <b>recordDecision</b>. Newest-first, queryable, impossible to fake.</p>
+        <div class="who"><div class="av">✓</div><div><div class="nm">Verifiable on Mantlescan</div><div class="rl">recordDecision()</div></div></div>
+      </div>
+      <div class="glass tst-card reveal">
+        <div class="tst-stars">GUARDRAILS</div>
+        <p class="quote">Weights must sum to 100%, no single layer above 70%, and USDY ≥ 50% in risk-off — checked <b>inside the contract</b>, not just the UI.</p>
+        <div class="who"><div class="av">✓</div><div><div class="nm">Enforced in Solidity</div><div class="rl">StockPilotAgent · 0.8.20</div></div></div>
+      </div>
+      <div class="glass tst-card reveal">
+        <div class="tst-stars">REAL RAILS</div>
+        <p class="quote">Live Fluxion DEX swaps, on-page Relay.link bridging across 65+ chains, and 155 real xStocks — not mockups, all wired to mainnet.</p>
+        <div class="who"><div class="av">✓</div><div><div class="nm">Shipped & live</div><div class="rl">app.stockpilotai.xyz</div></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Top Holdings -->
+<section id="assets" style="border-top:1px solid var(--line-2);background:linear-gradient(180deg,rgba(255,255,255,.012),transparent)">
+  <div class="section-inner" style="text-align:center">
+    <div class="section-label reveal">Top Holdings</div>
+    <h2 class="section-title reveal">Trade World-Class Stocks On-Chain</h2>
+    <p class="section-desc reveal" style="margin:0 auto">Access 155+ tokenized equities on Mantle — trade 24/7, fractional amounts, with deep DEX liquidity on Fluxion.</p>
+    <div class="assets-grid" id="assets-grid"></div>
+    <div class="assets-more reveal"><span>+ 143 more · ETFs, energy, mining, biotech, fintech &amp; crypto treasuries</span></div>
+  </div>
+</section>
+
+<!-- Partners -->
+<section id="partners" style="border-top:1px solid var(--line-2)">
+  <div class="section-inner" style="text-align:center">
+    <div class="section-label reveal">Ecosystem Partners</div>
+    <h2 class="section-title reveal">Powered by the Best in Web3</h2>
+    <p class="section-desc reveal" style="margin:0 auto">Built with leading protocols and AI platforms in the Mantle ecosystem.</p>
+    <div class="partners-grid">
+      <div class="partner-card reveal"><div class="name">Mantle Network</div><div class="role">L2 Blockchain</div></div>
+      <div class="partner-card reveal"><div class="name">xStocks</div><div class="role">Tokenized Equities</div></div>
+      <div class="partner-card reveal"><div class="name">Fluxion Network</div><div class="role">DEX on Mantle</div></div>
+      <div class="partner-card reveal"><div class="name">Relay.link</div><div class="role">Cross-Chain Bridge</div></div>
+      <div class="partner-card reveal"><div class="name">Ondo · USDY</div><div class="role">Tokenized Treasuries</div></div>
+      <div class="partner-card reveal"><div class="name">mETH</div><div class="role">Mantle Staked ETH</div></div>
+      <div class="partner-card reveal"><div class="name">Nansen</div><div class="role">On-Chain Analytics</div></div>
+      <div class="partner-card reveal"><div class="name">ELFA AI</div><div class="role">Market Intelligence</div></div>
+      <div class="partner-card reveal"><div class="name">AltLLM</div><div class="role">AI Inference</div></div>
+      <div class="partner-card reveal"><div class="name">RainbowKit</div><div class="role">Wallet Connection</div></div>
+    </div>
+    <div class="contract-box reveal">
+      <div class="label">Verified Smart Contract</div>
+      <div class="address">0xbbE80ACe5c46b49930ff0229762a1A57BE4CA6F4</div>
+      <div class="network">Mantle Mainnet · ChainID 5000</div>
+      <div style="margin-top:12px"><a href="https://mantlescan.xyz/address/0xbbE80ACe5c46b49930ff0229762a1A57BE4CA6F4#code" target="_blank" rel="noopener">View on Mantlescan →</a></div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <div class="section-inner">
+    <div class="cta-box reveal">
+      <h2>Ready to Invest?</h2>
+      <p>Connect your wallet, bridge assets to Mantle, and start building your AI-powered xStocks portfolio.</p>
+      <a href="https://app.stockpilotai.xyz" class="btn-primary">Launch App
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </a>
+    </div>
+  </div>
+</section>
+
+</div><!-- /.page-body -->
+
+<!-- Footer -->
+<footer>
+  <div class="footer-inner">
+    <a href="/" class="logo">
+      <div class="logo-icon" style="width:30px;height:30px"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M2 12L5 7L8 9L11 4L14 8" stroke="#04130d" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <span class="logo-text" style="font-size:16px">StockPilot</span>
+      <span class="logo-badge">AI</span>
+    </a>
+    <div class="footer-links">
+      <a href="https://app.stockpilotai.xyz">App</a>
+      <a href="https://github.com/kirst-dk/stockpilot-ai" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://dorahacks.io/buidl/43884" target="_blank" rel="noopener">DoraHacks</a>
+      <a href="https://x.com/0xkirst" target="_blank" rel="noopener">Twitter</a>
+      <a href="https://mantlescan.xyz/address/0xbbE80ACe5c46b49930ff0229762a1A57BE4CA6F4" target="_blank" rel="noopener">Contract</a>
+    </div>
+    <div class="footer-copy">© 2026 StockPilot AI · Built on Mantle Network</div>
+  </div>
+</footer>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script>
+/* ---------- Data load + assets + reveal + counters + donut (no-module, always runs) ---------- */
+const FEATURED = ["AAPLx","NVDAx","TSLAx","SPYx","MSFTx","AMZNx","GOOGLx","METAx","COINx","MSTRx","QQQx","AMDx","NFLXx","AVGOx","CRMx","HOODx","PLTRx","CRCLx"];
+let XSTOCKS = [];
+async function loadData(){
+  try{ const r = await fetch('xstocks-data.json'); XSTOCKS = await r.json(); }
+  catch(e){ XSTOCKS = []; }
+  buildAssets();
+}
+function buildAssets(){
+  const pick = FEATURED.map(s=>XSTOCKS.find(x=>x.symbol===s)).filter(Boolean).slice(0,12);
+  const host = document.getElementById('assets-grid');
+  if(host) host.innerHTML = pick.map(x=>`<div class="asset-card">
+    <img loading="lazy" src="logos/${x.symbol}.png" alt="${x.symbol}" onerror="this.style.visibility='hidden'">
+    <span style="text-align:left"><span class="sym" style="display:block">${x.symbol}</span><span class="nm">${x.name.replace(/ xStock$/,'')}</span></span></div>`).join('');
+}
+
+/* Animated number counters */
+function animateCount(el){
+  const target = parseFloat(el.dataset.count||'0');
+  const suffix = el.dataset.suffix||''; const prefix = el.dataset.prefix||'';
+  const comma = el.dataset.format==='comma';
+  const dur = 1200; const t0 = performance.now();
+  function fmt(v){ const n = comma ? Math.round(v).toLocaleString('en-US') : (target%1===0?Math.round(v):v.toFixed(1)); return prefix+n+suffix; }
+  function step(t){ const p = Math.min(1,(t-t0)/dur); const e = 1-Math.pow(1-p,3); el.textContent = fmt(target*e); if(p<1) requestAnimationFrame(step); }
+  requestAnimationFrame(step);
+}
+/* Donut segments draw-in */
+function drawDonut(svg){
+  svg.querySelectorAll('.seg').forEach((c,i)=>{
+    const len = parseFloat(c.dataset.len||'0'); const off = parseFloat(c.dataset.off||'0');
+    c.style.transition='stroke-dasharray 1s cubic-bezier(.2,.7,.2,1)';
+    c.style.strokeDashoffset = (-off);
+    setTimeout(()=>{ c.setAttribute('stroke-dasharray', len+' '+(327-len)); }, 120+i*140);
+  });
+}
+
+/* Scroll reveal + trigger counters/donut */
+const io = new IntersectionObserver((entries)=>{
+  entries.forEach(e=>{
+    if(e.isIntersecting){
+      e.target.classList.add('in');
+      e.target.querySelectorAll&&e.target.querySelectorAll('[data-count]').forEach(animateCount);
+      if(e.target.dataset&&e.target.dataset.count) animateCount(e.target);
+      const dn = e.target.querySelector&&e.target.querySelector('.donut svg'); if(dn) drawDonut(dn);
+      io.unobserve(e.target);
+    }
+  });
+},{threshold:.18});
+document.querySelectorAll('.reveal').forEach((el,i)=>{ el.style.transitionDelay=(i%6*60)+'ms'; io.observe(el); });
+/* Feature card glow follow */
+document.querySelectorAll('.feature-card').forEach(c=>{
+  c.addEventListener('pointermove',e=>{const r=c.getBoundingClientRect();c.style.setProperty('--mx',(e.clientX-r.left)+'px');c.style.setProperty('--my',(e.clientY-r.top)+'px');});
+});
+loadData();
+
+/* ===== New hero: rolling USDC coins + mobile nav sheet ===== */
+(function(){
+  var field=document.getElementById('coinField'); if(!field) return;
+  var reduceM=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var vw=window.innerWidth||1440;
+  var scale=Math.max(.45,Math.min(1,vw/1280));
+  // [yPercent, baseSize, durBase, dir, count, opacity]
+  var lanes=[[12,44,30,'r',4,.4],[26,56,25,'l',4,.5],[50,86,17,'r',4,.72],[70,110,14,'l',5,.9],[87,130,12,'r',4,1]];
+  lanes.forEach(function(L){
+    var y=L[0],sz=Math.round(L[1]*scale),dur=L[2],dir=L[3],count=L[4],op=L[5];
+    var dist=1.32*vw, turns=dist/(Math.PI*sz);
+    for(var i=0;i<count;i++){
+      var c=document.createElement('div');
+      c.className='coin'+(reduceM?'':' dir-'+dir);
+      c.style.setProperty('--y',y+'%');
+      c.style.setProperty('--sz',sz+'px');
+      c.style.setProperty('--op',op);
+      c.style.setProperty('--rot',Math.round(turns*360)+'deg');
+      var d=dur*(0.85+Math.random()*0.4);
+      c.style.setProperty('--dur',d.toFixed(1)+'s');
+      c.style.animationDelay=(-(d/count)*i - Math.random()*2).toFixed(2)+'s';
+      if(reduceM){ c.style.transform='translateX('+(4+Math.random()*88).toFixed(1)+'vw) rotate('+(Math.random()*360|0)+'deg)'; }
+      var face=document.createElement('div'); face.className='face';
+      var img=document.createElement('img'); img.src='usdc.png'; img.alt='USDC'; img.loading='lazy';
+      face.appendChild(img);
+      var sh=document.createElement('div'); sh.className='shine';
+      c.appendChild(face); c.appendChild(sh);
+      field.appendChild(c);
+    }
+  });
+})();
+(function(){
+  var b=document.getElementById('navBurger'), s=document.getElementById('navSheet'); if(!b||!s) return;
+  function close(){ s.classList.remove('open'); document.body.style.overflow=''; }
+  b.addEventListener('click',function(){ s.classList.add('open'); document.body.style.overflow='hidden'; });
+  s.addEventListener('click',function(e){ if(e.target.closest('a')||e.target.closest('[data-close]')||e.target.classList.contains('backdrop')) close(); });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape') close(); });
+})();
+</script>
+
+<script type="module">
+/* ============================================================================
+   Premium Three.js scene — shared renderer/scene/composer for Block 1 + Block 2
+   Block 1: USDC coins (InstancedMesh) → glowing portal → xStocks token cards
+            (atlas-based InstancedMesh). HDRI/PMREM · ACES · UnrealBloom · DoF.
+   Block 2: endless seamless xStocks token orbit (same InstancedMesh atlas system).
+   Transition: GSAP ScrollTrigger + Lenis crossfade portal ⇄ token stream.
+   ============================================================================ */
+const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const sceneWrap = document.getElementById('scene3d');
+const heroEl = document.querySelector('.hero');
+const fallbackEl = document.querySelector('.hero-fallback');
+function showFallback(){ if(fallbackEl) fallbackEl.style.display='flex'; }
+
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp = (a,b,t)=>a+(b-a)*t;
+const smooth = t=>t*t*(3-2*t);
+
+let scrollY = window.scrollY || 0;
+let blockT = 0;                 // 0 = portal (Block 1), 1 = token stream (Block 2)
+let streamExit = 0;             // 0 = stream framed, 1 = stream scrolled away (lower sections)
+let lenisActive = false, gsapActive = false;
+window.addEventListener('scroll', ()=>{ if(!lenisActive) scrollY = window.scrollY; }, {passive:true});
+
+/* ---------- Smooth scroll (Lenis) + scroll-driven transition (GSAP ScrollTrigger) ---------- */
+async function setupScroll(){
+  if(reduce) return;
+  try{
+    const Lenis = (await import('https://cdn.jsdelivr.net/npm/lenis@1.1.14/+esm')).default;
+    const lenis = new Lenis({ lerp:0.09, wheelMultiplier:1, smoothWheel:true });
+    lenisActive = true;
+    lenis.on('scroll', e=>{ scrollY = e.scroll; });
+    document.querySelectorAll('a[href^="#"]').forEach(a=>{
+      a.addEventListener('click', ev=>{
+        const id = a.getAttribute('href');
+        if(id && id.length>1){ const el=document.querySelector(id); if(el){ ev.preventDefault(); lenis.scrollTo(el,{offset:-72}); } }
+      });
+    });
+    try{
+      const gsap = (await import('https://cdn.jsdelivr.net/npm/gsap@3.12.5/+esm')).default;
+      const ScrollTrigger = (await import('https://cdn.jsdelivr.net/npm/gsap@3.12.5/ScrollTrigger/+esm')).default;
+      gsap.registerPlugin(ScrollTrigger);
+      lenis.on('scroll', ScrollTrigger.update);
+      gsap.ticker.add(t=>{ lenis.raf(t*1000); });
+      gsap.ticker.lagSmoothing(0);
+      ScrollTrigger.create({ trigger:'#stream', start:'top bottom', end:'top top', scrub:true,
+        onUpdate:self=>{ blockT = self.progress; } });
+      ScrollTrigger.create({ trigger:'#stream', start:'bottom bottom', end:'bottom top', scrub:true,
+        onUpdate:self=>{ streamExit = self.progress; } });
+      gsapActive = true;
+    }catch(e){
+      const raf = t=>{ lenis.raf(t); requestAnimationFrame(raf); }; requestAnimationFrame(raf);
+      console.warn('GSAP unavailable, scroll-based transition fallback:', e);
+    }
+  }catch(e){ lenisActive=false; console.warn('Lenis unavailable, native scroll:', e); }
+}
+setupScroll();
+
+/* prefers-reduced-motion: still build the premium scene, but render a single
+   static composed frame (portal + token ring) instead of the continuous
+   animation loop — no looping motion, parallax or scroll-driven camera. */
+{
+  try{
+    const THREE = await import('three');
+    const { EffectComposer } = await import('three/addons/postprocessing/EffectComposer.js');
+    const { RenderPass } = await import('three/addons/postprocessing/RenderPass.js');
+    const { UnrealBloomPass } = await import('three/addons/postprocessing/UnrealBloomPass.js');
+    const { OutputPass } = await import('three/addons/postprocessing/OutputPass.js');
+    const { RoomEnvironment } = await import('three/addons/environments/RoomEnvironment.js');
+
+    let W = sceneWrap.clientWidth || innerWidth, H = sceneWrap.clientHeight || innerHeight;
+    const mobile = W < 760;
+    let BokehPass = null;
+    if(!mobile && !reduce){ try{ BokehPass = (await import('three/addons/postprocessing/BokehPass.js')).BokehPass; }catch(e){} }
+
+    const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true, powerPreference:'high-performance' });
+    let dpr = Math.min(devicePixelRatio||1, mobile?1.5:2);
+    renderer.setPixelRatio(dpr);
+    renderer.setSize(W, H);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+    sceneWrap.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(48, W/H, 0.1, 100);
+    camera.position.set(0, 0.4, 15);
+    camera.lookAt(0,0,0);
+
+    // HDRI-style reflections from a procedural studio room (PMREM; no external asset)
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    pmrem.compileEquirectangularShader();
+    const envMap = pmrem.fromScene(new RoomEnvironment(), 0.035).texture;
+    scene.environment = envMap;
+
+    // Studio lighting: key / fill / rim + portal core light
+    scene.add(new THREE.AmbientLight(0x223044, 0.55));
+    const key = new THREE.DirectionalLight(0xffffff, 2.0); key.position.set(5,8,8); scene.add(key);
+    const fill = new THREE.DirectionalLight(0x4d8dff, 0.8); fill.position.set(-8,-1,6); scene.add(fill);
+    const rim = new THREE.DirectionalLight(0x2be8a6, 1.4); rim.position.set(0,-5,-9); scene.add(rim);
+    const portalLight = new THREE.PointLight(0x2be8a6, 6, 22, 2); portalLight.position.set(0,0,0.6); scene.add(portalLight);
+
+    function radialTex(c0,c1){
+      const cv=document.createElement('canvas'); cv.width=cv.height=256; const ctx=cv.getContext('2d');
+      const g=ctx.createRadialGradient(128,128,0,128,128,128);
+      g.addColorStop(0,c0); g.addColorStop(0.55,c1); g.addColorStop(1,'rgba(43,232,166,0)');
+      ctx.fillStyle=g; ctx.fillRect(0,0,256,256);
+      const t=new THREE.CanvasTexture(cv); t.colorSpace=THREE.SRGBColorSpace; return t;
+    }
+
+    // ---- Portal (Block 1): polished metal ring + emissive halo + glowing core + dark well ----
+    const portal = new THREE.Group(); scene.add(portal);
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(3, 0.17, 40, 220),
+      new THREE.MeshPhysicalMaterial({ color:0x0c2c24, metalness:1.0, roughness:0.12, emissive:0x2be8a6, emissiveIntensity:1.6, envMapIntensity:1.4, clearcoat:1, clearcoatRoughness:0.1 })
+    );
+    portal.add(ring);
+    const ring2 = new THREE.Mesh(
+      new THREE.TorusGeometry(3.32, 0.05, 24, 220),
+      new THREE.MeshBasicMaterial({ color:0x6effc9, transparent:true, opacity:0.5, blending:THREE.AdditiveBlending })
+    );
+    portal.add(ring2);
+    const core = new THREE.Mesh(
+      new THREE.PlaneGeometry(8,8),
+      new THREE.MeshBasicMaterial({ map:radialTex('rgba(120,255,210,0.9)','rgba(43,232,166,0.35)'), transparent:true, opacity:0.5, blending:THREE.AdditiveBlending, depthWrite:false })
+    );
+    core.position.z=-0.2; portal.add(core);
+    const well = new THREE.Mesh(
+      new THREE.CircleGeometry(2.84, 96),
+      new THREE.MeshBasicMaterial({ color:0x03100c, transparent:true, opacity:0.55 })
+    );
+    well.position.z=-0.08; portal.add(well);
+
+    // ---- Background "liquid" glass blobs (transmission) for depth/atmosphere ----
+    const blobs=[];
+    if(!mobile && !reduce){
+      const blobMat = new THREE.MeshPhysicalMaterial({ color:0x2be8a6, metalness:0, roughness:0.06, transmission:0.95, thickness:2.2, ior:1.35, iridescence:1, iridescenceIOR:1.3, envMapIntensity:1.2, transparent:true });
+      const blobMat2 = blobMat.clone(); blobMat2.color=new THREE.Color(0x4d8dff);
+      const b1 = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4, 6), blobMat); b1.position.set(-7.5,3,-9); scene.add(b1); blobs.push(b1);
+      const b2 = new THREE.Mesh(new THREE.IcosahedronGeometry(1.9, 6), blobMat2); b2.position.set(8,-3.5,-11); scene.add(b2); blobs.push(b2);
+    }
+
+    // ---- Particle dust for depth (skipped under reduced-motion to lighten the static frame) ----
+    let dust = null;
+    if(!reduce){
+      const dustGeo = new THREE.BufferGeometry();
+      const N = mobile?160:380; const dpos=new Float32Array(N*3);
+      for(let i=0;i<N;i++){ dpos[i*3]=(Math.random()-0.5)*30; dpos[i*3+1]=(Math.random()-0.5)*18; dpos[i*3+2]=(Math.random()-0.5)*16-3; }
+      dustGeo.setAttribute('position', new THREE.BufferAttribute(dpos,3));
+      dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color:0x8fe6c8, size:0.03, transparent:true, opacity:0.5, depthWrite:false }));
+      scene.add(dust);
+    }
+
+    // ---- Token ticker config (from xStocks; extend freely) ----
+    const TICKERS = ['SPYx','QQQx','NVDAx','AAPLx','MSFTx','TSLAx','METAx','GOOGLx','AMZNx','COINx','HOODx','MSTRx','CRCLx','NFLXx','PLTRx','AMDx','AVGOx','CRMx'];
+
+    // ---- Build a logo atlas (one texture for all tickers → single material for InstancedMesh) ----
+    function roundRect(ctx,x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+    function loadImg(src){ return new Promise(res=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=()=>res(null); im.src=src; }); }
+    async function buildAtlas(symbols){
+      const n=symbols.length;
+      const cols=Math.ceil(Math.sqrt(n)), rows=Math.ceil(n/cols), TS=256;
+      const cv=document.createElement('canvas'); cv.width=cols*TS; cv.height=rows*TS;
+      const ctx=cv.getContext('2d');
+      const imgs = await Promise.all(symbols.map(s=>loadImg('logos/'+s+'.png')));
+      for(let i=0;i<n;i++){
+        const col=i%cols, row=Math.floor(i/cols), x=col*TS, y=row*TS, pad=16, r=44;
+        ctx.save();
+        roundRect(ctx,x+pad,y+pad,TS-2*pad,TS-2*pad,r);
+        const g=ctx.createLinearGradient(x,y,x,y+TS);
+        g.addColorStop(0,'rgba(18,28,46,0.96)'); g.addColorStop(1,'rgba(8,13,24,0.96)');
+        ctx.fillStyle=g; ctx.fill();
+        ctx.lineWidth=3; ctx.strokeStyle='rgba(43,232,166,0.55)'; ctx.stroke();
+        ctx.save(); ctx.clip();
+        const im=imgs[i];
+        if(im){ const s=Math.round((TS-2*pad)*0.6); const ix=x+(TS-s)/2, iy=y+(TS-s)/2-14; ctx.drawImage(im, ix, iy, s, s); }
+        ctx.restore();
+        ctx.fillStyle='rgba(43,232,166,0.95)'; ctx.font='600 30px Satoshi, system-ui, sans-serif';
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(symbols[i], x+TS/2, y+TS-pad-30);
+        ctx.restore();
+      }
+      const tex=new THREE.CanvasTexture(cv); tex.colorSpace=THREE.SRGBColorSpace; tex.anisotropy=4; tex.needsUpdate=true;
+      return { tex, cols, rows, count:n };
+    }
+
+    // ---- Atlas-based token material (per-instance tile via instanced attribute) ----
+    function makeTokenMaterial(atlas){
+      const mat = new THREE.MeshStandardMaterial({
+        map: atlas.tex, emissiveMap: atlas.tex, emissive: 0xffffff, emissiveIntensity: 0.4,
+        metalness: 0.15, roughness: 0.55, transparent: true, side: THREE.DoubleSide,
+        envMapIntensity: 1.0, alphaTest: 0.04, depthWrite: true
+      });
+      mat.onBeforeCompile = (shader)=>{
+        shader.uniforms.uCols = { value: atlas.cols };
+        shader.uniforms.uRows = { value: atlas.rows };
+        shader.vertexShader = 'attribute float aTile;\nattribute float aOpacity;\nvarying float vTileOpacity;\nvarying vec2 vAtlasUv;\nuniform float uCols;\nuniform float uRows;\n'
+          + shader.vertexShader.replace('#include <uv_vertex>',
+            '#include <uv_vertex>\n'+
+            'vTileOpacity = aOpacity;\n'+
+            'float _col = mod(aTile, uCols);\n'+
+            'float _row = floor(aTile / uCols);\n'+
+            'vec2 _tile = vec2(1.0/uCols, 1.0/uRows);\n'+
+            'vAtlasUv = (vec2(_col, uRows - 1.0 - _row) + uv) * _tile;');
+        shader.fragmentShader = 'varying float vTileOpacity;\nvarying vec2 vAtlasUv;\n'
+          + shader.fragmentShader
+            .replace('#include <map_fragment>',
+              '#ifdef USE_MAP\n vec4 _tc = texture2D( map, vAtlasUv );\n diffuseColor *= _tc;\n#endif\n diffuseColor.a *= vTileOpacity;')
+            .replace('#include <emissivemap_fragment>',
+              '#ifdef USE_EMISSIVEMAP\n vec4 _ec = texture2D( emissiveMap, vAtlasUv );\n totalEmissiveRadiance *= _ec.rgb;\n#endif');
+      };
+      mat.customProgramCacheKey = ()=> 'tokenAtlas';
+      return mat;
+    }
+
+    // ---- Token instanced system factory ----
+    function makeTokenSystem(cap, material, size){
+      const geo = new THREE.PlaneGeometry(size, size);
+      geo.setAttribute('aTile', new THREE.InstancedBufferAttribute(new Float32Array(cap),1));
+      geo.setAttribute('aOpacity', new THREE.InstancedBufferAttribute(new Float32Array(cap),1));
+      const mesh = new THREE.InstancedMesh(geo, material, cap);
+      mesh.frustumCulled = false;
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      return { mesh, aTile: geo.getAttribute('aTile'), aOp: geo.getAttribute('aOpacity'), cap };
+    }
+
+    const dummy = new THREE.Object3D();
+
+    // ---- USDC coin (Block 1) as InstancedMesh ----
+    const coinGeo = new THREE.CylinderGeometry(0.62, 0.62, 0.13, 56);
+    const texLoader = new THREE.TextureLoader();
+    const usdcTex = texLoader.load('usdc.png'); usdcTex.colorSpace = THREE.SRGBColorSpace; usdcTex.anisotropy = 4;
+    const edgeMat = new THREE.MeshPhysicalMaterial({ color:0x2775ca, metalness:1.0, roughness:0.18, envMapIntensity:1.6, clearcoat:1, clearcoatRoughness:0.12 });
+    const faceMat = new THREE.MeshPhysicalMaterial({ map:usdcTex, metalness:0.35, roughness:0.32, envMapIntensity:1.2, clearcoat:0.8, clearcoatRoughness:0.2 });
+    const COIN_CAP = mobile?7:13;
+    const coinMesh = new THREE.InstancedMesh(coinGeo, [edgeMat, faceMat, faceMat], COIN_CAP);
+    coinMesh.frustumCulled = false; coinMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    scene.add(coinMesh);
+    const coinPool = Array.from({length:COIN_CAP}, ()=>({active:false,x:0,y:0,z:0,vy:0,rx:0,rz:0,ex:0,ey:0,ez:0,s:1}));
+    function spawnCoin(){
+      const c = coinPool.find(p=>!p.active); if(!c) return;
+      c.active=true; c.x=(Math.random()-0.5)*5.5; c.y=8.5+Math.random()*4; c.z=(Math.random()-0.5)*2.4;
+      c.ex=Math.random()*6.28; c.ey=Math.random()*6.28; c.ez=Math.random()*6.28;
+      c.vy=-(2.5+Math.random()*1.4); c.rx=(Math.random()-0.5)*3.4; c.rz=(Math.random()-0.5)*3.4; c.s=1;
+    }
+
+    // ---- Token systems (built after atlas loads) ----
+    let heroSys=null, streamSys=null, tokenMat=null, atlasCount=TICKERS.length;
+    const HERO_CAP = mobile?16:30;
+    const STREAM_CAP = mobile?12:26;
+    const heroPool = Array.from({length:HERO_CAP}, ()=>({active:false,life:0,ttl:0,x:0,y:0,z:0,vx:0,vy:0,vz:0,tile:0}));
+    function spawnToken(){
+      if(!heroSys) return;
+      const tkn = heroPool.find(p=>!p.active); if(!tkn) return;
+      tkn.active=true; tkn.life=0; tkn.ttl=2.6+Math.random()*1.3;
+      tkn.x=0; tkn.y=0; tkn.z=0.3;
+      const ang=Math.random()*Math.PI*2, sp=2.6+Math.random()*2.2;
+      tkn.vx=Math.cos(ang)*sp*0.8; tkn.vy=Math.sin(ang)*sp*0.62+0.4; tkn.vz=1.4+Math.random()*1.9;
+      tkn.tile=(Math.random()*atlasCount)|0;
+    }
+    // stream orbit instance descriptors
+    let streamItems=[];
+
+    (async()=>{
+      try{
+        const atlas = await buildAtlas(TICKERS);
+        atlasCount = atlas.count;
+        tokenMat = makeTokenMaterial(atlas);
+        heroSys = makeTokenSystem(HERO_CAP, tokenMat, 1.3); scene.add(heroSys.mesh);
+        streamSys = makeTokenSystem(STREAM_CAP, tokenMat, 1.18); scene.add(streamSys.mesh);
+        for(let i=0;i<STREAM_CAP;i++){
+          streamItems.push({ base:(i/STREAM_CAP)*Math.PI*2, tile:i%atlasCount, bob:Math.random()*6.28, bs:0.6+Math.random()*0.5 });
+          streamSys.aTile.array[i]=i%atlasCount;
+        }
+        streamSys.aTile.needsUpdate=true;
+        for(let i=0;i<6;i++) spawnToken();
+        if(reduce){ renderStatic(); }
+      }catch(e){ console.warn('Token atlas/systems unavailable:', e); }
+    })();
+
+    // ---- Postprocessing: Render → DoF(Bokeh) → Bloom → Output(ACES) ----
+    // Under reduced-motion we skip the whole post-processing chain and render the
+    // single static frame directly (the renderer still applies ACES tone mapping +
+    // sRGB), avoiding the bloom mip chain + DoF cost for a one-shot frame.
+    let composer=null, bokeh=null, bloom=null;
+    if(!reduce){
+      composer = new EffectComposer(renderer);
+      composer.addPass(new RenderPass(scene, camera));
+      if(BokehPass){ bokeh = new BokehPass(scene, camera, { focus:15.0, aperture:0.0006, maxblur:0.004 }); composer.addPass(bokeh); }
+      bloom = new UnrealBloomPass(new THREE.Vector2(W,H), mobile?0.6:0.9, 0.6, 0.78);
+      composer.addPass(bloom);
+      composer.addPass(new OutputPass());
+    }
+
+    const clock = new THREE.Clock();
+    let coinTimer=0;
+    const mouse={x:0,y:0};
+    window.addEventListener('pointermove', e=>{ mouse.x=(e.clientX/innerWidth)*2-1; mouse.y=-((e.clientY/innerHeight)*2-1); }, {passive:true});
+
+    function onResize(){
+      W=sceneWrap.clientWidth||innerWidth; H=sceneWrap.clientHeight||innerHeight;
+      camera.aspect=W/H; camera.updateProjectionMatrix();
+      renderer.setSize(W,H); if(composer){ composer.setSize(W,H); }
+      if(reduce){ renderStatic(); }
+    }
+    window.addEventListener('resize', onResize);
+
+    let running=true;
+    document.addEventListener('visibilitychange', ()=>{ running=!document.hidden; if(running){ if(reduce){ renderStatic(); } else { clock.getDelta(); animate(); } } });
+
+    let acc=0, frames=0, adapted=false;
+    const streamGroupOrigin = new THREE.Vector3(0,0,0);
+
+    // Accessibility: compose one rich static frame (portal + frozen token ring),
+    // no animation, when the user prefers reduced motion.
+    function renderStatic(){
+      camera.position.set(0, 0.35, 14.4);
+      camera.lookAt(0, 0.1, 0);
+      portal.visible = true;
+      portal.position.set(0,0,0); portal.rotation.set(0,0,0); portal.scale.setScalar(1);
+      ring.material.emissiveIntensity = 2.4;
+      ring2.material.opacity = 0.55;
+      core.material.opacity = 0.62; core.quaternion.copy(camera.quaternion);
+      well.material.opacity = 0.55;
+      portalLight.intensity = 6.0;
+      if(coinMesh) coinMesh.visible = false;
+      if(heroSys) heroSys.mesh.visible = false;
+      if(streamSys && streamItems.length){
+        streamSys.mesh.visible = true;
+        const Rx=mobile?4.6:7.2, Ry=mobile?2.0:2.7, Rz=mobile?3.0:4.2, t0=0.65;
+        for(let i=0;i<STREAM_CAP;i++){
+          const it=streamItems[i]; if(!it){ continue; }
+          const ang=it.base + t0;
+          const x=Math.cos(ang)*Rx;
+          const y=Math.sin(ang)*Ry;
+          const z=Math.sin(ang)*Rz - 1.5;
+          dummy.position.set(x,y,z);
+          dummy.quaternion.copy(camera.quaternion);
+          const depthScale = 0.9 + (z+Rz+1.5)/(2*Rz)*0.35;
+          dummy.scale.setScalar(depthScale);
+          dummy.updateMatrix(); streamSys.mesh.setMatrixAt(i,dummy.matrix);
+          streamSys.aOp.array[i]=1;
+        }
+        streamSys.mesh.instanceMatrix.needsUpdate=true; streamSys.aOp.needsUpdate=true;
+      }
+      if(composer){ composer.render(); } else { renderer.render(scene, camera); }
+    }
+
+    function animate(){
+      if(!running) return;
+      requestAnimationFrame(animate);
+      const dt = Math.min(clock.getDelta(), 0.05);
+      const t = clock.elapsedTime;
+
+      // hero scroll progress (Block 1 dolly)
+      const heroH = (heroEl?heroEl.offsetHeight:innerHeight)||innerHeight;
+      const p = clamp((scrollY||window.scrollY||0)/heroH, 0, 1);
+
+      // transition fallback when GSAP is unavailable
+      if(!gsapActive){
+        const b2 = document.getElementById('stream');
+        if(b2){ const top=b2.offsetTop, h=b2.offsetHeight; const start=top-innerHeight, end=top; blockT = clamp((scrollY-start)/Math.max(1,end-start),0,1);
+          const exStart=top+h-innerHeight, exEnd=top+h; streamExit = clamp((scrollY-exStart)/Math.max(1,exEnd-exStart),0,1); }
+      }
+      const rawT = clamp(blockT,0,1);
+      const bt = smooth(rawT);
+      const portalVis = 1 - smooth(clamp(rawT*1.5,0,1));
+      const streamT = smooth(clamp((rawT-0.25)/0.75,0,1)) * (1 - smooth(clamp(streamExit,0,1)));
+
+      // cinematic camera: cursor parallax + hero dolly, easing toward token-stream framing
+      const k = Math.min(1, dt*3.2);
+      const heroCamZ = 15 - p*4.8;
+      camera.position.x = lerp(camera.position.x, mouse.x*lerp(1.15,0.8,bt), k);
+      camera.position.y = lerp(camera.position.y, lerp(0.4 + mouse.y*0.7 + p*1.2, mouse.y*0.5, bt), k);
+      camera.position.z = lerp(camera.position.z, lerp(heroCamZ, 13.2, bt), k);
+      camera.lookAt(0, lerp(0.15 + p*0.5, 0, bt), 0);
+
+      // ----- Portal (fades/recedes as Block 2 takes over) -----
+      portal.visible = portalVis>0.02;
+      if(portal.visible){
+        portal.rotation.y = lerp(portal.rotation.y, mouse.x*0.16, k);
+        portal.rotation.x = lerp(portal.rotation.x, -mouse.y*0.12, k);
+        portal.position.y = Math.sin(t*0.6)*0.12;
+        portal.scale.setScalar(lerp(portal.scale.x, (1+p*0.18)*(0.55+0.45*portalVis), k));
+        ring.rotation.z += dt*0.22; ring2.rotation.z -= dt*0.3;
+        ring.material.emissiveIntensity = (1.5 + Math.sin(t*2.1)*0.4)*portalVis;
+        core.material.opacity = (0.46 + Math.sin(t*2.1)*0.08)*portalVis;
+        ring2.material.opacity = 0.5*portalVis;
+        well.material.opacity = 0.55*portalVis;
+        portalLight.intensity = (5.5 + Math.sin(t*2.1)*1.5)*portalVis;
+        core.quaternion.copy(camera.quaternion);
+      } else { portalLight.intensity = 0; }
+
+      dust.rotation.y += dt*0.02;
+      for(const b of blobs){ b.rotation.x += dt*0.12; b.rotation.y += dt*0.16; b.position.y += Math.sin(t*0.5+b.position.x)*dt*0.2; }
+
+      // ----- Coins (InstancedMesh) -----
+      coinMesh.visible = portalVis>0.04;
+      if(coinMesh.visible){
+        coinTimer += dt;
+        if(portalVis>0.5 && coinTimer > (mobile?0.5:0.32)){ coinTimer=0; spawnCoin(); }
+        for(let i=0;i<COIN_CAP;i++){
+          const c=coinPool[i];
+          if(c.active){
+            c.y += c.vy*dt; c.ex += c.rx*dt; c.ez += c.rz*dt;
+            if(c.y<3.2){ c.x += (0-c.x)*Math.min(1,dt*3.4); c.z += (0-c.z)*Math.min(1,dt*3.4); c.s=clamp((c.y+0.4)/3.6,0.05,1); }
+            if(c.y<0.05){ c.active=false; spawnToken(); if(Math.random()>0.45) spawnToken(); }
+            dummy.position.set(c.x,c.y,c.z); dummy.rotation.set(c.ex,c.ey,c.ez); dummy.scale.setScalar(c.s);
+          } else { dummy.position.set(0,0,0); dummy.scale.setScalar(0); dummy.rotation.set(0,0,0); }
+          dummy.updateMatrix(); coinMesh.setMatrixAt(i, dummy.matrix);
+        }
+        coinMesh.instanceMatrix.needsUpdate=true;
+      }
+
+      // ----- Hero token cards (atlas InstancedMesh) burst from portal -----
+      if(heroSys){
+        heroSys.mesh.visible = portalVis>0.04;
+        if(heroSys.mesh.visible){
+          for(let i=0;i<HERO_CAP;i++){
+            const u=heroPool[i];
+            if(u.active){
+              u.life+=dt; u.x+=u.vx*dt; u.y+=u.vy*dt; u.z+=u.vz*dt; u.vz*=(1-dt*0.5); u.vy-=dt*0.35;
+              const sc=Math.min(1,u.life/0.35);
+              let op=1; if(u.life>u.ttl-0.8) op=Math.max(0,(u.ttl-u.life)/0.8);
+              if(u.life>u.ttl || u.z>13){ u.active=false; }
+              dummy.position.set(u.x,u.y,u.z); dummy.quaternion.copy(camera.quaternion);
+              dummy.rotateZ(Math.sin((t+u.life)*1.4)*0.05); dummy.scale.setScalar(sc);
+              dummy.updateMatrix(); heroSys.mesh.setMatrixAt(i,dummy.matrix);
+              heroSys.aTile.array[i]=u.tile; heroSys.aOp.array[i]=op*portalVis;
+            } else {
+              dummy.position.set(0,0,0); dummy.scale.setScalar(0); dummy.updateMatrix(); heroSys.mesh.setMatrixAt(i,dummy.matrix);
+              heroSys.aOp.array[i]=0;
+            }
+          }
+          heroSys.mesh.instanceMatrix.needsUpdate=true; heroSys.aTile.needsUpdate=true; heroSys.aOp.needsUpdate=true;
+        }
+      }
+
+      // ----- Block 2: endless seamless token orbit (atlas InstancedMesh) -----
+      if(streamSys){
+        streamSys.mesh.visible = streamT>0.02;
+        if(streamSys.mesh.visible){
+          const Rx=mobile?4.6:7.2, Ry=mobile?2.0:2.7, Rz=mobile?3.0:4.2, speed=0.3;
+          for(let i=0;i<STREAM_CAP;i++){
+            const it=streamItems[i];
+            const ang=it.base + t*speed;
+            const x=Math.cos(ang)*Rx;
+            const y=Math.sin(ang)*Ry + Math.sin(t*it.bs + it.bob)*0.18;
+            const z=Math.sin(ang)*Rz - 1.5;
+            dummy.position.set(streamGroupOrigin.x+x, streamGroupOrigin.y+y, streamGroupOrigin.z+z);
+            dummy.quaternion.copy(camera.quaternion);
+            const depthScale = 0.9 + (z+Rz+1.5)/(2*Rz)*0.35;
+            dummy.scale.setScalar(depthScale);
+            dummy.updateMatrix(); streamSys.mesh.setMatrixAt(i,dummy.matrix);
+            streamSys.aOp.array[i]=streamT;
+          }
+          streamSys.mesh.instanceMatrix.needsUpdate=true; streamSys.aOp.needsUpdate=true;
+        }
+      }
+
+      composer.render();
+
+      // adaptive perf: if avg frame time is high, drop dpr + disable DoF once
+      if(!adapted){ acc+=dt; frames++; if(frames>70){ if(acc/frames>0.026){ dpr=Math.max(1,dpr-0.5); renderer.setPixelRatio(dpr); renderer.setSize(W,H); composer.setSize(W,H); if(bokeh) bokeh.enabled=false; } adapted=true; } }
+    }
+    if(reduce){ renderStatic(); } else { animate(); }
+  }catch(err){
+    console.error('3D scene failed, using fallback:', err);
+    showFallback();
+  }
+}
+</script>
+
+</body>
+</html>
