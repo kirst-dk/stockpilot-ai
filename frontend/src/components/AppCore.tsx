@@ -45,6 +45,9 @@ const ERC8004_AGENT_ID = 143;
 const ERC8004_SCAN = "https://8004scan.io/agents/mantle/143";
 // Custom identity contract: on-chain reputation + verifiable-AI rationale anchor (Mantle Mainnet)
 const IDENTITY_CONTRACT = "0x98611629c106FCf8Dc35A28a2db3a59638DB237a";
+// On-chain compliance attestor: each cycle's pre-trade compliance verdict is hashed & committed
+// so verifyCompliance(report) → MATCH (verifiable compliance, not a claim). Mantle Mainnet.
+const COMPLIANCE_CONTRACT = "0x6d8aADb868CF8d2C7031d593D78b11119D0f3e72";
 // RWA / AI Yield Optimizer (USDY) — Mantle Mainnet addresses
 const USDY_ORACLE = "0xA96abbe61AfEdEB0D14a20440Ae7100D9aB4882f";
 const USDY_TOKEN = "0x5bE26527e817998A7206475496fDE1E68957c5A6";
@@ -2957,6 +2960,7 @@ type AutopilotStatus = {
   live_swaps: boolean;
   contract: string;
   identity_contract?: string;
+  compliance_contract?: string;
   agent_id?: number;
   agent_wallet?: string | null;
   agent_funded: boolean;
@@ -4088,6 +4092,21 @@ export function AutopilotTabContent() {
           </div>
           <div className="text-[9px] font-mono text-white/30 break-all">
             Reputation/Anchor: <a href={`https://mantlescan.xyz/address/${IDENTITY_CONTRACT}#code`} target="_blank" rel="noreferrer" className="hover:text-violet-300">{IDENTITY_CONTRACT}</a>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap pt-1">
+            <a href={`https://mantlescan.xyz/address/${COMPLIANCE_CONTRACT}#events`} target="_blank" rel="noreferrer" className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${lastDecision?.compliance_passed === false ? "border-rose-500/30 bg-rose-500/10 text-rose-200 hover:border-rose-400/60" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200 hover:border-emerald-400/60"}`}>
+              On-chain compliance {lastDecision?.compliance_passed === false ? "· leg blocked" : "· pre-trade PASS"}
+            </a>
+            <span className="text-[9px] text-white/35">every cycle&apos;s pre-trade verdict hashed &amp; committed — verifyCompliance(report) → MATCH</span>
+          </div>
+          {lastDecision?.compliance_report && (
+            <div className="text-[9px] font-mono text-white/30 break-all">
+              Verdict: <span className="text-white/45">{lastDecision.compliance_report}</span>
+              {lastDecision.compliance_tx_hash && <> · <a href={`https://mantlescan.xyz/tx/${lastDecision.compliance_tx_hash}`} target="_blank" rel="noreferrer" className="hover:text-emerald-300">attestation tx ↗</a></>}
+            </div>
+          )}
+          <div className="text-[9px] font-mono text-white/30 break-all">
+            Compliance attestor: <a href={`https://mantlescan.xyz/address/${COMPLIANCE_CONTRACT}#code`} target="_blank" rel="noreferrer" className="hover:text-emerald-300">{COMPLIANCE_CONTRACT}</a>
           </div>
         </div>
       </div>
